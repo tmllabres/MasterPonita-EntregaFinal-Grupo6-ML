@@ -5,7 +5,9 @@ sobre un conjunto de 119.390 reservas de hotel, selecciona el mejor según una m
 justificada, y automatiza el flujo completo desde el CSV crudo hasta la inferencia.
 
 > **Máster en IA, Cloud Computing y DevOps** · Machine Learning y Deep Learning
-> Práctica de evaluación final · 2026-02
+> Práctica de evaluación final · Entrega: 15 de septiembre de 2026
+>
+> **Repositorio:** <https://github.com/tmllabres/MasterPonita-ML-EntregaFinal-Grupo6>
 
 <!--
 Este README es la documentación completa de la práctica. El guion lo permite:
@@ -176,8 +178,8 @@ más en este negocio y por qué el equilibrio es lo razonable aquí.
 **Requisitos:** Python 3.12
 
 ```bash
-git clone <URL-del-repositorio>
-cd Entrega-Final-ML
+git clone https://github.com/tmllabres/MasterPonita-ML-EntregaFinal-Grupo6.git
+cd MasterPonita-ML-EntregaFinal-Grupo6
 
 python -m venv .venv
 .venv\Scripts\activate          # Windows

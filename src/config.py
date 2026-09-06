@@ -41,18 +41,31 @@ FUGAS = ["reservation_status", "reservation_status_date"]
 TEST_SIZE = 0.20
 ESTRATIFICAR = True       # conserva el mismo reparto de clases en las dos mitades
 
-# CUIDADO con las cuentas de filas. Sobre el CSV crudo son 119.390 -> 95.512 / 23.878,
+# Las cuentas de filas, ya cerradas. Sobre el CSV crudo son 119.390 -> 95.512 / 23.878,
 # pero eso es ANTES de limpiar. Con la limpieza que declara data_loader.limpiar()
 # (fugas + duplicados exactos + imposibles) quedan 86.971 filas -> 69.577 / 17.394,
-# y el reparto pasa de 62,96/37,04 a 72,69/27,31. Los duplicados exactos son 32.252
-# filas, el 27 % del dataset, y el 63,4 % de ellas son cancelaciones: por eso al
-# quitarlas la clase positiva se hunde diez puntos.
+# y el reparto pasa de 62,96/37,04 a 72,69/27,31.
+
+# ── Duplicados exactos: DECISIÓN TOMADA ──────────────────────────────────────
+# Son 32.252 filas, el 27 % del dataset, y el 63,4 % de ellas son cancelaciones.
 #
-# DECISIÓN PENDIENTE, y hay que tomarla antes de entrenar: ¿son esos 32.252 un error
-# de registro o reservas legítimamente idénticas (misma noche, mismo precio, mismo
-# hotel, grupos)? Tirarlas cambia la prevalencia diez puntos y con ella la
-# justificación de la métrica principal. Se decide, se justifica en el README y se
-# actualizan los números de los apartados 2, 5 y 8.
+# Se ELIMINAN. El razonamiento, que es de dominio y no estadístico: el CSV no trae
+# identificador de reserva, así que dos filas idénticas en las 29 predictoras son
+# indistinguibles y no hay forma de demostrar que sean reservas distintas. Dejarlas
+# tiene un coste asimétrico: si una copia cae en train y su gemela en test, el modelo
+# ya vio ese ejemplo exacto y su nota en test sale inflada SIN que salte ningún error.
+# Perder algunas reservas de grupo legítimas es un precio menor que publicar una
+# métrica de test que no es honesta.
+#
+# Consecuencia asumida: la prevalencia baja diez puntos (37,04 % -> 27,31 %), y con
+# ella sube el acierto del modelo trivial (62,96 % -> 72,69 %), que es justo el
+# argumento del apartado 5 contra usar accuracy. Los números de los apartados 2, 5, 7
+# y 8 del README salen TODOS de esta decisión.
+#
+# Se eliminan DESPUÉS de quitar las fugas (si no, reservation_status_date desempata
+# filas que son la misma reserva: serían 31.994 en vez de 32.252) y SIEMPRE ANTES de
+# particionar, o la propia partición ya habría repartido las gemelas entre los dos lados.
+ELIMINAR_DUPLICADOS = True
 
 # ── Evaluación ───────────────────────────────────────────────────────────────
 # Métrica principal declarada ANTES de entrenar. Se justifica en el README.
@@ -63,9 +76,19 @@ CV_FOLDS = 5              # StratifiedKFold dentro del train
 UMBRAL = 0.50             # el de la librería; si lo mueves, dilo y justifícalo
 
 # ── Ajuste de hiperparámetros ────────────────────────────────────────────────
-BUSQUEDA = "random"       # "grid" | "random" | None
+# DESACTIVADO a propósito para la entrega del 15 de septiembre.
+#
+# No es que no sepamos hacerlo: el comparador está diseñado para soportarlo y cada
+# modelo declara su espacio_busqueda(). Es una decisión de calendario. Con 9 días,
+# 6 modelos x 5 folds x 30 iteraciones sobre 69.577 filas se va a horas de cómputo,
+# y el riesgo de descubrir un fallo a las tres horas de ejecución no compensa.
+#
+# Sin búsqueda, la ejecución completa dura minutos y el sistema entrega entero, que es
+# lo que el enunciado puntúa. Se declara como limitación en el apartado 10 del README.
+# Para activarlo, si sobrara tiempo: BUSQUEDA = "random". No hay que tocar nada más.
+BUSQUEDA = None           # "grid" | "random" | None
 N_ITER_RANDOM = 30        # solo si BUSQUEDA == "random"
-N_JOBS = -1
+N_JOBS = -1               # ojo: n_jobs=1 para la red de Keras, o se sobre-suscribe la CPU
 
 # ── Qué modelos entran en la comparación ─────────────────────────────────────
 # El bucle de model_trainer recorre esta lista. Añadir un modelo = añadir una línea.

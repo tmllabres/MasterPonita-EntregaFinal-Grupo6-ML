@@ -36,20 +36,6 @@ def curva_roc(modelos_proba: dict, y_true, ruta=None):
     raise NotImplementedError("TODO")
 
 
-def curva_pr(modelos_proba: dict, y_true, ruta=None):
-    """Precision-Recall. No es obligatoria, pero con clases desbalanceadas dice
-    más que la ROC, porque no usa los TN. Su suelo de azar es la prevalencia (0,370)."""
-    raise NotImplementedError("TODO")
-
-
-def barrido_umbral(y_true, y_proba):
-    """Tabla umbral -> precision, recall, F1. Para justificar el umbral elegido.
-
-    Se decide sobre VALIDACIÓN, nunca sobre test.
-    """
-    raise NotImplementedError("TODO")
-
-
 def importancias(pipeline, X, y, ruta=None):
     """Gráfico de importancia de variables del ganador. Guarda en config.FIG_IMPORTANCIAS.
 
