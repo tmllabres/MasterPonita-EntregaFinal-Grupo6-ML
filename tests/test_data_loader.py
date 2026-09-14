@@ -15,8 +15,6 @@ import pytest
 
 from src import config, data_loader
 
-pytestmark = pytest.mark.skip(reason="TODO: quitar cuando data_loader esté implementado")
-
 
 def test_limpiar_elimina_las_columnas_de_fuga(df_falso):
     """reservation_status y reservation_status_date no pueden sobrevivir a limpiar()."""

@@ -38,35 +38,79 @@ Si trabajas solo, dilo aquí y explica que lo hablaste con el profesor.
 
 ## 2. El problema y por qué este dataset
 
-<!--
-Qué se predice, para quién, y qué decisión cambia el modelo.
-Aquí entra la justificación de negocio: qué le cuesta al hotel cada tipo de error.
--->
-
 - **Objetivo:** predecir si una reserva se cancelará (`is_canceled = 1`) o no (`0`).
 - **Tipo de problema:** clasificación binaria supervisada.
 - **Filas del CSV crudo:** 119.390 · **Columnas:** 32 · **Predictoras reales:** 29
 - **Reparto de clases en crudo:** 62,96 % no cancela / 37,04 % cancela (razón 1,70 : 1)
-- **Tras la limpieza:** _(rellenar: filas que quedan y reparto resultante)_
-
-<!--
-OJO, y esto hay que resolverlo antes de entrenar: los duplicados EXACTOS del CSV son
-32.252 filas, el 27 % del dataset, y el 63,4 % de ellas son cancelaciones. Si se
-eliminan, quedan 86.971 filas y el reparto pasa a 72,69 / 27,31. Diez puntos de
-prevalencia menos cambian la justificación de la métrica del apartado 5 y el tamaño
-del test del apartado 8.
-¿Son un error de registro o reservas legítimamente idénticas (mismo hotel, misma
-noche, mismo precio, grupos)? Decidid, justificadlo aquí, y que los números de los
-apartados 2, 5 y 8 salgan todos de la MISMA decisión.
--->
+- **Tras la limpieza:** 86.971 filas · 72,69 % no cancela / 27,31 % cancela (razón 2,66 : 1)
 
 El diccionario de variables está en [`docs/diccionario_datos.md`](docs/diccionario_datos.md).
 
-**Fuga de datos detectada y eliminada.** `reservation_status` y `reservation_status_date`
-determinan el objetivo al 100 % (`Check-Out` → 0; `Canceled` y `No-Show` → 1): son la
-etiqueta escrita con otras palabras. Si se dejan, los cinco modelos sacan un AUC ≈ 1,000
-y la comparación no distingue nada. De ahí la cuenta: **32 − `is_canceled` − 2 de fuga = 29**
-columnas predictoras.
+### Para quién es, y qué decisión cambia
+
+El destinatario es el departamento de *revenue management* del hotel, y la decisión
+concreta que cambia es **cuántas habitaciones se vuelven a poner a la venta**.
+
+Una reserva confirmada bloquea inventario. Si esa reserva se va a cancelar y nadie lo sabe
+hasta el día de la llegada, la habitación ya no se puede vender a nadie: el inventario de
+un hotel es perecedero, y la noche del 14 de agosto no se puede vender el día 15. Con una
+probabilidad de cancelación **por reserva** se puede hacer overbooking controlado, decidir
+a quién se le pide prepago o depósito, y dimensionar plantilla y compras en los días de más
+riesgo.
+
+Sin modelo, la única alternativa es aplicar la tasa media de cancelación a todo el mundo
+por igual —que es, literalmente, lo que hace el clasificador trivial contra el que se mide
+el sistema en el apartado 5.
+
+### Qué le cuesta al hotel cada tipo de error
+
+Los dos errores duelen, y no de la misma manera:
+
+| Error | Qué pasa | Qué cuesta |
+|---|---|---|
+| **Falso negativo** — se predice «no cancela» y la reserva se cancela | La habitación se queda vacía sin que nadie lo viera venir | La noche entera, y no se recupera: no hubo margen para revenderla |
+| **Falso positivo** — se predice «cancela» y el cliente aparece | El hotel ha revendido una habitación que sí se iba a ocupar y tiene que realojar al huésped | Compensación, traslado a otro establecimiento y una reseña negativa que dura mucho más que la noche |
+
+El dataset **no trae el coste en euros de ninguno de los dos**, así que no se puede fijar
+una razón coste-beneficio y optimizar por dinero. De ahí que la métrica del apartado 5 sea
+F1 —que obliga a atender a los dos errores— y no una métrica asimétrica elegida a ojo. Es
+también la limitación que se reconoce en el apartado 10.
+
+### Fuga de datos detectada y eliminada
+
+`reservation_status` y `reservation_status_date` determinan el objetivo al 100 %
+(`Check-Out` → 0; `Canceled` y `No-Show` → 1): son la etiqueta escrita con otras palabras.
+Si se dejan, los cinco modelos sacan un AUC ≈ 1,000 y la comparación no distingue nada. De
+ahí la cuenta: **32 − `is_canceled` − 2 de fuga = 29** columnas predictoras.
+
+### Los 32.252 duplicados exactos: se eliminan
+
+Son el **27,0 %** del dataset, y el **63,4 %** de ellas son cancelaciones, así que no es una
+decisión menor: mueve la prevalencia del objetivo casi diez puntos.
+
+**Se eliminan.** El razonamiento es de dominio y no estadístico: el CSV no trae
+identificador de reserva, de modo que dos filas idénticas en las 29 predictoras son
+indistinguibles y no hay forma de demostrar que sean reservas distintas. Dejarlas tiene un
+coste asimétrico: si una copia cae en train y su gemela en test, el modelo ya vio ese
+ejemplo exacto y su nota de test sale inflada **sin que salte ningún error**. Perder algunas
+reservas de grupo legítimas es un precio menor que publicar una métrica de test que no es
+honesta.
+
+El orden de la limpieza importa, y está fijado en `data_loader.limpiar()`:
+
+1. **Primero las fugas.** Mientras `reservation_status_date` siga en la tabla, desempata
+   filas que son la misma reserva: saldrían 31.994 duplicados en vez de 32.252.
+2. **Después los duplicados**, y siempre **antes de particionar**. Si se particiona primero,
+   la propia partición ya ha repartido las gemelas entre los dos lados.
+3. **Por último los imposibles:** 1 reserva con `adr` negativo y 166 sin ningún huésped
+   (0 adultos, 0 niños y 0 bebés). No son valores raros discutibles: son reservas que no
+   pueden existir y que, por tanto, tampoco pueden cancelarse.
+
+**Consecuencia asumida.** La prevalencia de cancelación baja de 37,04 % a **27,31 %**, y con
+ella sube el acierto del modelo trivial de 62,96 % a **72,69 %** —que es justo el argumento
+del apartado 5 contra usar accuracy como criterio. Los números de los apartados 5, 7 y 8
+salen todos de esta misma decisión: de las 86.971 filas limpias, **69.576 van a train y
+17.395 al test**, con un 27,31 % de cancelaciones en cada mitad (`stratify=y`).
 
 ---
 
@@ -258,7 +302,7 @@ Las métricas de CV son media ± desviación sobre el train. La del test se mide
 **Modelo elegido:** _(…)_ · **Por qué gana:** _(…)_
 
 Métricas del ganador sobre el conjunto de test _(N reservas nunca vistas: 23.878 si no
-se eliminan los duplicados, 17.394 si sí — poned el número real)_:
+se eliminan los duplicados, 17.395 si sí — poned el número real)_:
 
 | | valor |
 |---|---|

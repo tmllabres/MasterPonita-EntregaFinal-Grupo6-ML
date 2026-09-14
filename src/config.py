@@ -37,13 +37,30 @@ OBJETIVO = "is_canceled"
 # reservation_status: Check-Out -> 0 ; Canceled y No-Show -> 1.
 FUGAS = ["reservation_status", "reservation_status_date"]
 
+# ── Alta cardinalidad ────────────────────────────────────────────────────────
+# Tres columnas tienen demasiadas categorías para un one-hot directo: country (177
+# valores + nulo), agent (333) y company (352). Un one-hot ingenuo de las 29
+# predictoras se va a ~890 columnas, casi todas ceros: el árbol y el bosque se
+# comen la memoria y la logística sobreajusta sobre categorías con 3 reservas.
+#
+# Se agrupan en las TOP_N_CATEGORIAS más frecuentes y el resto cae en un cajón
+# común, con lo que la matriz se queda en 109 columnas. Se aprende dentro del
+# Pipeline, fold a fold: qué categorías son «las más frecuentes» es un número que
+# se aprende de los datos, y aprenderlo del test sería fuga.
+#
+# Ojo: agent y company son float64 en el CSV (IDs numéricos con nulos), así que
+# select_dtypes("object") NO las ve. Por eso van listadas a mano.
+ALTA_CARDINALIDAD = ["country", "agent", "company"]
+TOP_N_CATEGORIAS = 10
+
 # ── Partición ────────────────────────────────────────────────────────────────
 TEST_SIZE = 0.20
 ESTRATIFICAR = True       # conserva el mismo reparto de clases en las dos mitades
 
 # Las cuentas de filas, ya cerradas. Sobre el CSV crudo son 119.390 -> 95.512 / 23.878,
 # pero eso es ANTES de limpiar. Con la limpieza que declara data_loader.limpiar()
-# (fugas + duplicados exactos + imposibles) quedan 86.971 filas -> 69.577 / 17.394,
+# (fugas + duplicados exactos + imposibles) quedan 86.971 filas -> 69.576 / 17.395
+# (train_test_split redondea el test HACIA ARRIBA: ceil(86.971 x 0,20) = 17.395),
 # y el reparto pasa de 62,96/37,04 a 72,69/27,31.
 
 # ── Duplicados exactos: DECISIÓN TOMADA ──────────────────────────────────────
@@ -80,7 +97,7 @@ UMBRAL = 0.50             # el de la librería; si lo mueves, dilo y justifícal
 #
 # No es que no sepamos hacerlo: el comparador está diseñado para soportarlo y cada
 # modelo declara su espacio_busqueda(). Es una decisión de calendario. Con 9 días,
-# 6 modelos x 5 folds x 30 iteraciones sobre 69.577 filas se va a horas de cómputo,
+# 6 modelos x 5 folds x 30 iteraciones sobre 69.576 filas se va a horas de cómputo,
 # y el riesgo de descubrir un fallo a las tres horas de ejecución no compensa.
 #
 # Sin búsqueda, la ejecución completa dura minutos y el sistema entrega entero, que es
