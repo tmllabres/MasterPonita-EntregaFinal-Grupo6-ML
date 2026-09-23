@@ -20,12 +20,17 @@ if str(RAIZ) not in sys.path:
 
 @pytest.fixture(scope="session")
 def df_falso():
-    """Un DataFrame diminuto con la MISMA forma que el CSV real.
+    """Un DataFrame diminuto con las columnas del CSV real que toca limpiar() (8 de 32).
 
-    Los tests no leen data/raw: son 119.390 filas y tardarían más que el pipeline
-    entero. Se construye a mano un caso con todo lo que la limpieza tiene que
-    cazar —un duplicado exacto, un adr negativo, una reserva sin huéspedes y las
-    dos columnas de fuga— y se comprueba que cae exactamente eso y nada más.
+    Los tests de limpieza no leen data/raw: con un caso hecho a mano se sabe de
+    antemano qué tiene que caer. Lleva todo lo que la limpieza tiene que cazar —un
+    duplicado exacto, un adr negativo, una reserva sin huéspedes y las dos columnas
+    de fuga— y se comprueba que cae exactamente eso y nada más. Los tests de partición
+    y de preprocesado sí leen el CSV real, a través de preparar(), y tardan menos de
+    un segundo.
+
+    Es de sesión: lo comparten todos los tests, así que nadie puede modificarlo.
+    test_limpiar_no_modifica_su_entrada comprueba que limpiar() no lo hace.
     """
     import pandas as pd
 

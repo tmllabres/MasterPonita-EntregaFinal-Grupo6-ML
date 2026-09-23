@@ -22,8 +22,11 @@ from sklearn.preprocessing import FunctionTransformer, OneHotEncoder, StandardSc
 
 from . import config
 
-# El texto "NULL" que traen company y agent no es un nulo para pandas: lo lee como
-# una cadena más y acabaría siendo una categoría del one-hot con 112.593 reservas.
+# Los nulos del CSV vienen escritos como el texto "NULL": country (488), agent (16.340)
+# y company (112.593). pandas ya trata "NULL", "null" y "" como nulo por defecto, así
+# que hoy esta lista no cambia el resultado (comprobado: con y sin ella sale el mismo
+# DataFrame). Se deja explícita para que la decisión se vea aquí y no dependa de la
+# lista por defecto de pandas; " " no está en esa lista y se añade por si acaso.
 NA_VALUES = ["NULL", "null", "", " "]
 
 # Las tres columnas que definen "reserva sin huéspedes". Se suman las tres: una
@@ -39,8 +42,8 @@ def _miles(n: int) -> str:
 def cargar_crudo(ruta=None) -> pd.DataFrame:
     """Lee el CSV tal cual viene, sin tocar nada.
 
-    Ojo con los nulos: `company` y `agent` traen el texto "NULL", que pandas no
-    reconoce como ausente salvo que se lo digas con na_values.
+    Ojo con los nulos: `country`, `agent` y `company` traen el texto "NULL". pandas ya
+    lo lee como NaN por defecto; NA_VALUES lo deja escrito para no depender de eso.
     """
     return pd.read_csv(config.DATA_RAW if ruta is None else ruta, na_values=NA_VALUES)
 
@@ -49,16 +52,17 @@ def limpiar(df: pd.DataFrame) -> pd.DataFrame:
     """Quita fugas, duplicados e imposibles. Devuelve MENOS filas de las que recibe.
 
     Orden que importa:
-      1. eliminar config.FUGAS  (determinan el objetivo al 100 %)
+      1. eliminar config.FUGAS  (la respuesta escrita con otras palabras)
       2. eliminar duplicados exactos
       3. eliminar imposibles: adr negativo, reservas con 0 huéspedes
     Deja registrado cuántas filas caen en cada paso: eso va al README.
     """
     filas_iniciales = len(df)
 
-    # 1. Fugas. Primero, y no por capricho de orden: reservation_status_date es una
-    #    fecha casi distinta para cada reserva, así que mientras esté ahí apenas hay
-    #    dos filas idénticas y el paso 2 no encontraría nada que borrar.
+    # 1. Fugas. Primero, y no por capricho de orden: el modelo nunca va a ver estas
+    #    columnas, así que no pueden decidir qué es un duplicado. Con ellas dentro
+    #    saldrían 31.994 duplicados en vez de 33.413: 1.419 filas idénticas en todo lo
+    #    que ve el modelo sobrevivirían solo por diferir en una columna de fuga.
     fugas = [c for c in config.FUGAS if c in df.columns]
     df = df.drop(columns=fugas)
     print(f"      [limpieza] fugas: -{len(fugas)} columnas ({', '.join(fugas)})")
@@ -69,9 +73,10 @@ def limpiar(df: pd.DataFrame) -> pd.DataFrame:
         df = df.drop_duplicates()
         print(f"      [limpieza] duplicados exactos: -{_miles(antes - len(df))} filas")
 
-    # 3. Imposibles. No son valores raros que haya que discutir: son reservas que no
-    #    pueden existir. Un adr negativo no es un precio, y una reserva sin ninguna
-    #    persona no es una reserva; ni la una ni la otra se pueden cancelar.
+    # 3. Imposibles. No son valores raros que haya que discutir: un adr negativo no es
+    #    un precio, y una reserva sin ninguna persona no es la reserva de nadie. Su
+    #    etiqueta no describe a ningún cliente (16 de las 165 sin huéspedes constan
+    #    como canceladas), así que solo aportarían ruido.
     if "adr" in df.columns:
         adr_negativo = df["adr"] < 0
     else:
@@ -95,9 +100,9 @@ def limpiar(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def separar_X_y(df: pd.DataFrame):
-    """Devuelve (X, y). X son las 29 columnas predictoras; y es is_canceled.
+    """Devuelve (X, y). X son las 27 columnas predictoras; y es is_canceled.
 
-    La cuenta: 32 columnas del CSV − is_canceled − las 2 de fuga = 29.
+    La cuenta: 32 columnas del CSV − is_canceled − las 4 de fuga = 27.
     """
     # Las fugas ya no están si el df viene de limpiar(), pero esto no es redundancia
     # inútil: separar_X_y también se usa sobre trozos del CSV crudo (la demo de
@@ -120,6 +125,15 @@ def particionar(X, y):
     )
 
 
+def _columna_a_texto(col: pd.Series) -> pd.Series:
+    """Una columna de _a_texto. Si es de IDs numéricos, pasa por entero antes del texto."""
+    numeros = pd.to_numeric(col, errors="coerce")
+    if (numeros.notna() == col.notna()).all():
+        # Todo lo que no es nulo es un número: es una columna de IDs (agent, company).
+        col = numeros.round().astype("Int64")
+    return col.astype(object).where(col.notna(), "desconocido").astype(str)
+
+
 def _a_texto(X: pd.DataFrame) -> pd.DataFrame:
     """Pasa a texto las columnas de alta cardinalidad, con "desconocido" por nulo.
 
@@ -127,14 +141,21 @@ def _a_texto(X: pd.DataFrame) -> pd.DataFrame:
     company son float64 (IDs numéricos con nulos). Sin esto, el imputador de constante
     revienta al meter la cadena "desconocido" en una columna numérica.
 
+    Los IDs pasan a entero ANTES de convertirse en texto. Si no, el agente 9 del CSV
+    (float64) se aprende como "9.0", y una reserva que llega en inferencia con agent=9
+    (un int, como sale de un JSON) se convierte en "9", no coincide con nada y cae en
+    silencio en el cajón de infrecuentes. Así, 9, 9.0 y "9" son todos "9".
+
     Y el nulo se convierte en categoría a propósito, no por comodidad: que no haya
     agente significa que la reserva es directa, y que no haya empresa significa que no
     es un viaje corporativo. Imputar ahí la moda sería inventarse un intermediario.
+    En agent (13,7 % de nulos en train) y company (94,1 %) "desconocido" tiene columna
+    propia; en country (0,5 %) no llega al top y cae en el cajón de infrecuentes.
 
     Va como función del módulo y no como lambda porque joblib guarda el Pipeline
     entero, y una lambda no se puede serializar.
     """
-    return X.astype(object).where(X.notna(), "desconocido").astype(str)
+    return X.apply(_columna_a_texto)
 
 
 def construir_preprocesador(X_train) -> ColumnTransformer:
@@ -155,6 +176,12 @@ def construir_preprocesador(X_train) -> ColumnTransformer:
     numericas = [c for c in X_train.select_dtypes(include="number").columns if c not in alta]
     categoricas = [c for c in X_train.select_dtypes(include=["object", "category", "bool"]).columns
                    if c not in alta]
+
+    # remainder="drop" tiraría sin avisar una columna de un tipo no previsto (una fecha,
+    # por ejemplo). Mejor que reviente aquí que perder una predictora en silencio.
+    sin_rama = [c for c in X_train.columns if c not in {*alta, *numericas, *categoricas}]
+    if sin_rama:
+        raise ValueError(f"columnas sin rama en el preprocesador: {sin_rama}")
 
     # Mediana y no media: lead_time y adr tienen la cola larga a la derecha.
     rama_numericas = Pipeline([
