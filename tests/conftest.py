@@ -20,11 +20,11 @@ if str(RAIZ) not in sys.path:
 
 @pytest.fixture(scope="session")
 def df_falso():
-    """Un DataFrame diminuto con las columnas del CSV real que toca limpiar() (8 de 32).
+    """Un DataFrame diminuto con las columnas del CSV real que toca limpiar() (10 de 32).
 
     Los tests de limpieza no leen data/raw: con un caso hecho a mano se sabe de
     antemano qué tiene que caer. Lleva todo lo que la limpieza tiene que cazar —un
-    duplicado exacto, un adr negativo, una reserva sin huéspedes y las dos columnas
+    duplicado exacto, un adr negativo, una reserva sin huéspedes y las cuatro columnas
     de fuga— y se comprueba que cae exactamente eso y nada más. Los tests de partición
     y de preprocesado sí leen el CSV real, a través de preparar(), y tardan menos de
     un segundo.
@@ -35,14 +35,16 @@ def df_falso():
     import pandas as pd
 
     filas = [
-        # hotel, is_canceled, adr, adults, children, babies, reservation_status, fecha
-        ("City Hotel",   0,  95.0, 2, 0, 0, "Check-Out", "2017-07-01"),
-        ("City Hotel",   0,  95.0, 2, 0, 0, "Check-Out", "2017-07-01"),  # duplicado exacto
-        ("Resort Hotel", 1, -50.0, 1, 0, 0, "Canceled",  "2017-07-02"),  # adr negativo
-        ("Resort Hotel", 1,  80.0, 0, 0, 0, "No-Show",   "2017-07-03"),  # 0 huéspedes
-        ("City Hotel",   1, 120.0, 2, 1, 0, "Canceled",  "2017-07-04"),  # fila sana
+        # hotel, is_canceled, adr, adults, children, babies, reservation_status, fecha,
+        # plazas de parking, habitación asignada
+        ("City Hotel",   0,  95.0, 2, 0, 0, "Check-Out", "2017-07-01", 1, "A"),
+        ("City Hotel",   0,  95.0, 2, 0, 0, "Check-Out", "2017-07-01", 1, "A"),  # duplicado exacto
+        ("Resort Hotel", 1, -50.0, 1, 0, 0, "Canceled",  "2017-07-02", 0, "A"),  # adr negativo
+        ("Resort Hotel", 1,  80.0, 0, 0, 0, "No-Show",   "2017-07-03", 0, "D"),  # 0 huéspedes
+        ("City Hotel",   1, 120.0, 2, 1, 0, "Canceled",  "2017-07-04", 0, "A"),  # fila sana
     ]
     return pd.DataFrame(filas, columns=[
         "hotel", "is_canceled", "adr", "adults", "children", "babies",
         "reservation_status", "reservation_status_date",
+        "required_car_parking_spaces", "assigned_room_type",
     ])
