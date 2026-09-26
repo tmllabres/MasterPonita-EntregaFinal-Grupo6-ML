@@ -51,26 +51,30 @@ FUGAS_DIRECTAS = ["reservation_status", "reservation_status_date"]
 #   · assigned_room_type: la habitación se asigna el día de llegada. Es distinta de la
 #     reservada en el 18,8 % de las Check-Out y el 17,2 % de los No-Show, pero solo en
 #     el 1,4 % de las canceladas: quien cancela antes no llega a tener habitación.
-# Con ellas, un HistGradientBoostingClassifier por defecto (semilla 42, StratifiedKFold
-# de 5 sobre las mismas 68.648 filas de train) sube el F1 de 0,678 a 0,710; con el
-# XGBoost por defecto, de 0,686 a 0,719. Es nota regalada, no la que tendría en producción.
+# Con ellas, un HistGradientBoostingClassifier por defecto (salvo la semilla, 42) sube
+# el F1 en validación cruzada (StratifiedKFold de 5 sobre las 68.648 filas de train, las
+# mismas con y sin las dos columnas) de 0,678 a 0,710; con el XGBoost por defecto, de
+# 0,686 a 0,719. Es nota regalada, no la que tendría en producción.
 FUGAS_POSTERIORES = ["required_car_parking_spaces", "assigned_room_type"]
 
 FUGAS = FUGAS_DIRECTAS + FUGAS_POSTERIORES
 
 # booking_changes se QUEDA, con una duda declarada: el CSV guarda el número FINAL de
-# cambios, y parte de ellos pueden ser posteriores al momento de predecir. Pero no pasa
-# la prueba que delata al parking: el 14,7 % de los No-Show tienen algún cambio (frente
-# al 20,3 % de las Check-Out y el 6,2 % de las canceladas), así que no se rellena solo a
-# la llegada. Los cambios hechos hasta el momento de predecir sí serían información
-# legítima, y la duda cuesta poco: sin ella, el mismo boosting baja de 0,678 a 0,671.
+# cambios, y parte de ellos pueden ser posteriores al momento de predecir. La prueba
+# que delató al parking no la señala: el 14,7 % de los No-Show, que nunca llegan, tienen
+# algún cambio (frente al 20,3 % de las Check-Out), así que no se rellena solo a la
+# llegada. La duda está en las canceladas, con un 6,2 %: parte será que cancelan antes
+# de tener ocasión de cambiar nada, y parte, cambios que aún no existían al predecir.
+# Los cambios hechos hasta el momento de predecir sí serían información legítima, y la
+# duda cuesta poco: sin la columna, el mismo boosting baja de 0,678 a 0,671.
 
 # ── Alta cardinalidad ────────────────────────────────────────────────────────
 # Tres columnas tienen demasiadas categorías para un one-hot directo. En X_train
 # (68.648 filas): country 168 valores, agent 325 y company 320, las tres con nulos.
 # Un one-hot ingenuo de las 27 predictoras se va a 880 columnas (16 numéricas + 864
-# de categorías, contando el nulo como una categoría más), casi todas ceros: el árbol y el bosque se comen la memoria y la
-# logística sobreajusta sobre categorías con 3 reservas.
+# de categorías, contando el nulo como una categoría más), casi todas ceros: el árbol
+# y el bosque se comen la memoria y la logística sobreajusta sobre categorías con 3
+# reservas.
 #
 # Se agrupan en las TOP_N_CATEGORIAS más frecuentes y el resto cae en un cajón
 # común, con lo que la matriz se queda en 97 columnas (16 numéricas + 48 de las 8

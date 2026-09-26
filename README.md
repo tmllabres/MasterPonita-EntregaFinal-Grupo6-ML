@@ -95,20 +95,23 @@ los datos lo delatan (cifras sobre el CSV crudo):
 | `required_car_parking_spaces` | 7.416 reservas con plaza: **0 canceladas y 0 No-Show**. Si se anotara al reservar, cabrían unas 2.670 cancelaciones y 75 No-Show; las peticiones especiales, que sí se hacen al reservar, cancelan un 21,7 % | La plaza se anota cuando el cliente llega en coche: quien no llega, nunca la tiene |
 | `assigned_room_type` | Distinta de la reservada en el 18,8 % de las Check-Out y el 17,2 % de los No-Show, pero **solo en el 1,4 % de las canceladas** | La habitación se asigna el día de llegada (por eso los No-Show sí la tienen); quien cancela antes nunca llega a ese día |
 
-Con las dos dentro, un `HistGradientBoostingClassifier` con sus valores por defecto
-(semilla 42, `StratifiedKFold` de 5 sobre las mismas 68.648 filas de train) sube el F1 de
-**0,678 a 0,710** (y el AUC de 0,897 a 0,914); con el XGBoost por defecto, el salto es
-parecido (de 0,686 a 0,719). Es nota regalada: cuando toca predecir, nadie tiene todavía
-plaza anotada ni habitación asignada.
+Con las dos dentro, un `HistGradientBoostingClassifier` por defecto (salvo la semilla, 42)
+sube el F1 en validación cruzada de **0,678 a 0,710**, y el AUC de 0,897 a 0,914. Se mide
+con un `StratifiedKFold` de 5 sobre las 68.648 reservas de train (la partición se explica
+al final de este apartado), las mismas con y sin las dos columnas. Con el XGBoost por
+defecto, el salto es parecido: de 0,686 a 0,719. Es nota regalada: cuando toca predecir,
+nadie tiene todavía plaza anotada ni habitación asignada.
 
 **`booking_changes` se queda, con una duda declarada.** El CSV guarda el número *final* de
-cambios, y parte puede ser posterior al momento de predecir. Pero no pasa la prueba que
-delata al parking: en el CSV crudo, el **14,7 % de los No-Show** tienen algún cambio (frente
-al 20,3 % de las Check-Out y el 6,2 % de las canceladas), así que el campo no se rellena
-solo a la llegada. En train, con cambios cancela un 15,6 % y sin cambios un 30,3 %: separa,
-pero no delata el desenlace. Los cambios hechos hasta el momento de predecir sí son
-información legítima, y la duda cuesta poco: sin la columna, el mismo boosting baja de
-0,678 a 0,671. Queda como limitación para el apartado 10.
+cambios, y parte puede ser posterior al momento de predecir. La prueba que delató al
+parking no la señala: en el CSV crudo, el **14,7 % de los No-Show**, que nunca llegan,
+tienen algún cambio (frente al 20,3 % de las Check-Out), así que el campo no se rellena
+solo a la llegada. La duda está en las canceladas, con un 6,2 %: parte será que cancelan
+antes de tener ocasión de cambiar nada, y parte, cambios que todavía no existían al
+predecir. En train, con cambios cancela un 15,6 % y sin cambios un 30,3 %: separa, pero no
+adivina el desenlace. Los cambios hechos hasta el momento de predecir sí son información
+legítima, y la duda cuesta poco: sin la columna, el mismo boosting baja de 0,678 a 0,671.
+Queda como limitación para el apartado 10.
 
 De ahí la cuenta: **32 − `is_canceled` − 4 de fuga = 27** columnas predictoras. Las cuatro
 están en `config.FUGAS`, con su porqué.

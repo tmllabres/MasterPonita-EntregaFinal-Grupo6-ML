@@ -28,6 +28,10 @@ from . import config
 # sin ella sale el mismo DataFrame). Se deja explícita para que la decisión se vea aquí y
 # no dependa de la lista por defecto de pandas; " " no está en esa lista y se añade por
 # si acaso. "NA" no le quita nada a country: ningún país del CSV tiene ese código.
+#
+# Ojo si se recorta: _columna_a_texto usa la misma lista para reconocer el nulo escrito
+# como texto en un lote de inferencia, y ahí sí cambia el resultado. Un "NULL" que no
+# esté en la lista cae en el cajón de infrecuentes en vez de en "desconocido".
 NA_VALUES = ["NULL", "null", "NA", "", " "]
 
 # Las tres columnas que definen "reserva sin huéspedes". Se suman las tres: una
@@ -134,13 +138,18 @@ def _columna_a_texto(col: pd.Series) -> pd.Series:
     "NULL" escrito como texto en un lote de inferencia haría que el 9.0 de la fila de al
     lado se quedara en "9.0" y cayera en el cajón de infrecuentes. La codificación de una
     reserva no puede depender de qué otras reservas lleguen con ella.
+
+    El texto se compara sin espacios alrededor: " PRT " es "PRT", como lo aprendió el
+    train.
     """
     texto = col.astype(object).astype(str).str.strip()
-    numeros = pd.to_numeric(col, errors="coerce")
-    es_numero = numeros.notna()
+    numeros = pd.to_numeric(col, errors="coerce").astype(float)
+    # Solo los números que caben en un entero: un "inf" o un 1e20 no son el ID de nadie,
+    # se quedan como texto y caen en el cajón en vez de tumbar el lote entero.
+    es_numero = numeros.abs() < 2**63
     texto[es_numero] = numeros[es_numero].round().astype("Int64").astype(str)
-    # El nulo en cualquiera de sus formas: NaN o None de verdad, o el texto "NULL" o ""
-    # que llega de un JSON o de un formulario sin pasar por cargar_crudo().
+    # El nulo tal como lo escribe NA_VALUES: NaN o None de verdad, o uno de esos textos
+    # ("NULL", "", ...) llegado de un JSON o de un formulario sin pasar por cargar_crudo().
     return texto.mask(col.isna() | texto.isin(NA_VALUES), "desconocido")
 
 

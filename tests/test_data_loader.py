@@ -73,7 +73,7 @@ def test_particionar_conserva_el_reparto_de_clases():
     """stratify=y: la proporción de cancelaciones tiene que ser la misma en train y test.
 
     La tolerancia es de una milésima y no de un punto: sin stratify, con la semilla 42 la
-    diferencia ya sale de 0,0036, y una tolerancia de 0,01 no la vería."""
+    diferencia ya es de 0,0036, y una tolerancia de 0,01 no la vería."""
     d = data_loader.preparar()
     p_train = d["y_train"].mean()
     p_test = d["y_test"].mean()
@@ -229,11 +229,12 @@ def test_la_rama_numerica_sale_escalada(prep_ajustado, datos):
 
 
 def test_una_categoria_nunca_vista_no_revienta(prep_ajustado, datos):
-    """En la validación cruzada de --demo, un fold puede no ver nunca una categoría rara
-    (distribution_channel "Undefined" sale 3 veces en todo el train) y encontrársela al
-    validar. Con handle_unknown="ignore" es una fila de ceros; con "error", una excepción
-    a mitad de la comparación. X_test no trae ninguna categoría nueva, así que sin esto
-    nada lo probaría."""
+    """En la validación cruzada de --demo, un fold se encuentra al validar una categoría
+    que su train no ha visto nunca: distribution_channel "Undefined" sale 3 veces en el
+    train completo y 1 en el de --demo, que en el fold 0 cae en validación. Con
+    handle_unknown="ignore" es una fila de ceros; con "error", una excepción a mitad de
+    la comparación. X_test no trae ninguna categoría nueva, así que sin esto nada lo
+    probaría."""
     fila = datos["X_test"].iloc[[0]].copy()
     fila["meal"] = "ZZ"
     salida = pd.Series(prep_ajustado.transform(fila)[0],
@@ -252,18 +253,24 @@ def test_un_agente_nunca_visto_cae_en_el_cajon(prep_ajustado, datos):
     assert salida["alta__agent_infrequent_sklearn"] == 1
 
 
-def test_un_valor_sucio_no_cambia_la_codificacion_de_su_vecina(prep_ajustado, datos):
-    """En inferencia, un "NULL" escrito como texto no puede arrastrar al cajón de
-    infrecuentes al agente de la fila de al lado: cada reserva se tiene que codificar
-    igual llegue sola o acompañada, y el "NULL" tiene que ser "desconocido"."""
+@pytest.mark.parametrize("sucio,columna", [
+    ("NULL", "desconocido"), (" NULL ", "desconocido"), ("null", "desconocido"),
+    ("", "desconocido"), ("sin agente", "infrequent_sklearn"), ("inf", "infrequent_sklearn"),
+])
+def test_un_valor_sucio_no_cambia_la_codificacion_de_su_vecina(prep_ajustado, datos,
+                                                                sucio, columna):
+    """En inferencia, un valor escrito a mano no puede arrastrar al cajón de infrecuentes
+    al agente de la fila de al lado: cada reserva se tiene que codificar igual llegue sola
+    o acompañada. Y el valor sucio va a su sitio: el nulo escrito como texto (con o sin
+    espacios) a "desconocido", y lo que no es ni número ni nulo, al cajón."""
     agente = datos["X_train"]["agent"].mode()[0]
     fila = datos["X_test"].iloc[[0]].copy()
     fila["agent"] = float(agente)
     sola = prep_ajustado.transform(fila)
 
     lote = pd.concat([fila, fila], ignore_index=True)
-    lote["agent"] = pd.Series([float(agente), "NULL"], dtype=object)
+    lote["agent"] = pd.Series([float(agente), sucio], dtype=object)
     salida = pd.DataFrame(prep_ajustado.transform(lote),
                           columns=prep_ajustado.get_feature_names_out())
     np.testing.assert_array_equal(salida.iloc[[0]].to_numpy(), sola)
-    assert salida.loc[1, "alta__agent_desconocido"] == 1
+    assert salida.loc[1, f"alta__agent_{columna}"] == 1
