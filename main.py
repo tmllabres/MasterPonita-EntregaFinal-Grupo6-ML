@@ -22,7 +22,7 @@ def main(demo: bool = False) -> None:
 
     # 2. Entrenar los seis con el mismo protocolo y compararlos por validación
     #    cruzada dentro del train. El test no se toca aquí.
-    #    Devuelve la tabla Y los pipelines ajustados: los cinco hacen falta para la
+    #    Devuelve la tabla Y los pipelines ajustados: los seis hacen falta para la
     #    curva ROC comparativa del paso 4.
     print("[2/5] Entrenando y comparando modelos…")
     tabla, modelos = model_trainer.entrenar_y_comparar(d["X_train"], d["y_train"],
@@ -45,8 +45,9 @@ def main(demo: bool = False) -> None:
     m = evaluator.metricas(d["y_test"], y_pred, y_proba)
     evaluator.matriz_confusion(d["y_test"], y_pred)
 
-    # Las cinco curvas en los mismos ejes, que es lo que pide el enunciado: una
-    # predict_proba por modelo sobre el mismo test.
+    # Las seis curvas en los mismos ejes (la del baseline cae sobre la diagonal del
+    # azar), que es la ROC comparativa que pide el enunciado: una predict_proba por
+    # modelo sobre el mismo test.
     evaluator.curva_roc({n: p.predict_proba(d["X_test"])[:, 1] for n, p in modelos.items()},
                         d["y_test"])
 
@@ -63,5 +64,6 @@ def main(demo: bool = False) -> None:
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description="Pipeline de cancelación de reservas")
     p.add_argument("--demo", action="store_true",
-                   help="muestra reducida y menos folds, para la defensa")
+                   help="muestra reducida, menos folds y menos épocas en la red, "
+                        "para la defensa")
     main(**vars(p.parse_args()))

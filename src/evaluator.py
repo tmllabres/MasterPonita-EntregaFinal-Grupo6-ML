@@ -30,8 +30,8 @@ def matriz_confusion(y_true, y_pred, ruta=None):
 def curva_roc(modelos_proba: dict, y_true, ruta=None):
     """Figura obligatoria del enunciado. Guarda en config.FIG_ROC.
 
-    LAS CINCO CURVAS EN LOS MISMOS EJES, con su AUC en la leyenda y la diagonal
-    del azar. Cinco gráficos sueltos no demuestran nada.
+    LAS SEIS CURVAS EN LOS MISMOS EJES, con su AUC en la leyenda y la diagonal
+    del azar. Seis gráficos sueltos no demuestran nada.
     """
     raise NotImplementedError("TODO")
 

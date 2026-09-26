@@ -162,7 +162,12 @@ MODELOS_ACTIVOS = [
 
 # ── Modo demo ────────────────────────────────────────────────────────────────
 # La defensa son 30 minutos. Con esto activado el pipeline entrena sobre una
-# muestra y con menos folds, para enseñar el circuito completo sin esperar.
+# muestra, con menos folds y con menos épocas en la red, para enseñar el circuito
+# completo sin esperar.
 DEMO = False
 DEMO_FILAS = 20_000
 DEMO_FOLDS = 3
+# 15 y no 5: con 5 la red se corta a medio aprender (su mejor época es siempre la
+# última) y en la tabla de la demo cae del 2.º al 4.º puesto. Con 15 recupera el sitio
+# que tiene en la ejecución completa por unos segundos más.
+DEMO_EPOCAS = 15

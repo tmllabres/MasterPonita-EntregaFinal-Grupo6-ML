@@ -30,9 +30,17 @@ xgboost==2.1.3
 # y no quieres descubrirlo la víspera de la entrega.
 tensorflow==2.18.0
 
+# tensorflow pide keras>=3.5 sin techo: sin fijarla, cada instalación trae la última
+# y la red se guarda y se carga con una versión que nadie ha probado. Esta es la probada.
+keras==3.15.1
+
 # ── Gráficos ─────────────────────────────────────────────────────────────────
 matplotlib==3.9.2
 seaborn==0.13.2
+
+# matplotlib 3.9 pide pyparsing sin techo, y a partir de la 3.3 cada import de
+# matplotlib (Keras lo importa por dentro) llena la salida de pytest de avisos.
+pyparsing==3.2.3
 
 # ── Notebooks ────────────────────────────────────────────────────────────────
 jupyterlab==4.3.4
