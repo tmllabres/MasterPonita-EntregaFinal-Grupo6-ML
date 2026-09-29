@@ -1,0 +1,12 @@
+{
+  "ganador": "boosting",
+  "metrica_principal": "f1",
+  "umbral": 0.5,
+  "demo": false,
+  "f1": 0.6994400895856663,
+  "accuracy": 0.8436170832605022,
+  "precision": 0.7458801050871746,
+  "recall": 0.6584440227703985,
+  "roc_auc": 0.9065937920888925,
+  "n": 17163
+}
