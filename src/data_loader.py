@@ -1,15 +1,10 @@
-"""Carga y transformación de datos.
+"""Carga, limpieza, partición y preprocesado de los datos.
 
-Este módulo hace tres cosas y ninguna más:
-  1. leer el CSV crudo,
-  2. limpiar lo que BORRA FILAS (duplicados, imposibles, fugas) — fuera del Pipeline,
-  3. partir en train/test y construir el ColumnTransformer SIN ajustar.
-
-Por qué la limpieza vive aquí y no en el Pipeline: un transformador de scikit-learn
-devuelve tantas filas como recibe. Si tirara filas, la `y` se quedaría descolocada
-respecto a la `X` y nadie te avisaría. Todo lo que borra filas va antes de partir;
-todo lo que APRENDE un número de los datos (medianas, categorías, medias del escalado)
-va dentro del ColumnTransformer, para que lo aprenda solo con el train.
+La limpieza quita filas, así que se hace aquí, antes de partir, y no en el Pipeline:
+un transformador de scikit-learn devuelve tantas filas como recibe, y si quitara filas
+la `y` dejaría de cuadrar con la `X` sin dar ningún error. Lo que se aprende de los
+datos (medianas, escalado, categorías) va en el preprocesador, dentro del Pipeline,
+para que se aprenda solo con el train.
 """
 from __future__ import annotations
 
@@ -22,20 +17,15 @@ from sklearn.preprocessing import FunctionTransformer, OneHotEncoder, StandardSc
 
 from . import config
 
-# Los nulos del CSV vienen escritos de dos formas: como el texto "NULL" en country (488),
-# agent (16.340) y company (112.593), y como "NA" en children (4). pandas ya trata todos
-# como nulo por defecto, así que hoy esta lista no cambia el resultado (comprobado: con y
-# sin ella sale el mismo DataFrame). Se deja explícita para que la decisión se vea aquí y
-# no dependa de la lista por defecto de pandas; " " no está en esa lista y se añade por
-# si acaso. "NA" no le quita nada a country: ningún país del CSV tiene ese código.
-#
-# Ojo si se recorta: _columna_a_texto usa la misma lista para reconocer el nulo escrito
-# como texto en un lote de inferencia, y ahí sí cambia el resultado. Un "NULL" que no
-# esté en la lista cae en el cajón de infrecuentes en vez de en "desconocido".
+# Los nulos del CSV vienen como el texto "NULL" (country, agent, company) o "NA"
+# (children; ningún país del CSV usa ese código). pandas ya los lee como nulo, pero dejo
+# la lista escrita para no depender de su lista por defecto. _columna_a_texto la usa
+# también al predecir: un "NULL" que faltara aquí caería en el cajón de infrecuentes y
+# no en "desconocido".
 NA_VALUES = ["NULL", "null", "NA", "", " "]
 
-# Las tres columnas que definen "reserva sin huéspedes". Se suman las tres: una
-# reserva de 0 adultos pero 2 niños es rara, pero no es imposible.
+# Columnas que definen una "reserva sin huéspedes". Se suman las tres porque una
+# reserva con 0 adultos y 2 niños es rara, pero no imposible.
 HUESPEDES = ["adults", "children", "babies"]
 
 
@@ -45,44 +35,38 @@ def _miles(n: int) -> str:
 
 
 def cargar_crudo(ruta=None) -> pd.DataFrame:
-    """Lee el CSV tal cual viene, sin tocar nada.
+    """Lee el CSV original, sin limpiar.
 
-    Ojo con los nulos: `country`, `agent` y `company` traen el texto "NULL", y `children`
-    el texto "NA". pandas ya los lee como NaN por defecto; NA_VALUES lo deja escrito para
-    no depender de eso.
+    Los nulos escritos como texto ("NULL", "NA") se leen como NaN gracias a NA_VALUES.
     """
     return pd.read_csv(config.DATA_RAW if ruta is None else ruta, na_values=NA_VALUES)
 
 
 def limpiar(df: pd.DataFrame) -> pd.DataFrame:
-    """Quita fugas, duplicados e imposibles. Devuelve MENOS filas de las que recibe.
+    """Quita las columnas de fuga, los duplicados exactos y los registros imposibles.
 
-    Orden que importa:
-      1. eliminar config.FUGAS  (la respuesta escrita con otras palabras)
-      2. eliminar duplicados exactos
-      3. eliminar imposibles: adr negativo, reservas con 0 huéspedes
-    Deja registrado cuántas filas caen en cada paso: eso va al README.
+    El orden importa: primero las fugas, luego los duplicados y al final los imposibles
+    (adr negativo y reservas sin huéspedes). Se llama antes de partir en train y test, e
+    imprime lo que quita cada paso (son las cifras del apartado 2 del README).
     """
     filas_iniciales = len(df)
 
-    # 1. Fugas. Primero, y no por capricho de orden: el modelo nunca va a ver estas
-    #    columnas, así que no pueden decidir qué es un duplicado. Con ellas dentro
-    #    saldrían 31.994 duplicados en vez de 33.413: 1.419 filas idénticas en todo lo
-    #    que ve el modelo sobrevivirían solo por diferir en una columna de fuga.
+    # 1. Fugas (ver config.FUGAS y el apartado 2 del README). Van primero porque el
+    #    modelo no ve estas columnas, así que no deben decidir qué es un duplicado: con
+    #    ellas dentro saldrían 31.994 duplicados en vez de 33.413.
     fugas = [c for c in config.FUGAS if c in df.columns]
     df = df.drop(columns=fugas)
     print(f"      [limpieza] fugas: -{len(fugas)} columnas ({', '.join(fugas)})")
 
-    # 2. Duplicados exactos. El porqué de borrarlos está razonado en config.
+    # 2. Duplicados exactos, antes de partir: si una copia cayera en train y otra en
+    #    test, el modelo se evaluaría con reservas que ya ha visto.
     if config.ELIMINAR_DUPLICADOS:
         antes = len(df)
         df = df.drop_duplicates()
         print(f"      [limpieza] duplicados exactos: -{_miles(antes - len(df))} filas")
 
-    # 3. Imposibles. No son valores raros que haya que discutir: un adr negativo no es
-    #    un precio, y una reserva sin ninguna persona no es la reserva de nadie. Su
-    #    etiqueta no describe a ningún cliente (16 de las 165 sin huéspedes constan
-    #    como canceladas), así que solo aportarían ruido.
+    # 3. Imposibles: un adr negativo no es un precio válido y una reserva sin huéspedes
+    #    no corresponde a ningún cliente, así que su etiqueta solo añadiría ruido.
     if "adr" in df.columns:
         adr_negativo = df["adr"] < 0
     else:
@@ -94,8 +78,8 @@ def limpiar(df: pd.DataFrame) -> pd.DataFrame:
     else:
         sin_huespedes = pd.Series(False, index=df.index)
 
-    # El conteo de "0 huéspedes" descuenta las que ya caían por adr, o los cuatro
-    # números que se imprimen no sumarían el total.
+    # Al contar las de 0 huéspedes descuento las que ya caen por adr negativo, para que
+    # los números impresos sumen el total.
     print(f"      [limpieza] adr negativo: -{_miles(int(adr_negativo.sum()))} filas")
     print("      [limpieza] 0 huéspedes: "
           f"-{_miles(int((sin_huespedes & ~adr_negativo).sum()))} filas")
@@ -106,22 +90,22 @@ def limpiar(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def separar_X_y(df: pd.DataFrame):
-    """Devuelve (X, y). X son las 27 columnas predictoras; y es is_canceled.
+    """Devuelve (X, y): X con las 27 columnas predictoras e y = is_canceled.
 
-    La cuenta: 32 columnas del CSV − is_canceled − las 4 de fuga = 27.
+    Son 27 porque al CSV (32 columnas) se le quitan is_canceled y las 4 de fuga.
     """
-    # Las fugas ya no están si el df viene de limpiar(), pero esto no es redundancia
-    # inútil: separar_X_y también se usa sobre trozos del CSV crudo (la demo de
-    # predictor), y ahí dejarlas dentro de X sería regalarle la respuesta al modelo.
+    # Con un df de limpiar() las fugas ya no están, pero las quito también aquí por si
+    # llegan datos sin limpiar: dejarlas en X sería darle la respuesta al modelo.
     fuera = [c for c in [config.OBJETIVO, *config.FUGAS] if c in df.columns]
     return df.drop(columns=fuera), df[config.OBJETIVO].astype(int)
 
 
 def particionar(X, y):
-    """train_test_split con test_size, semilla y stratify de config.
+    """Parte en train y test con el test_size, la semilla y el stratify de config.
 
-    Se llama UNA vez y desde aquí. Si cada módulo partiera por su cuenta, cada
-    modelo se compararía contra un reparto distinto y la tabla no valdría nada.
+    Se parte una sola vez, aquí, para que todos los modelos se comparen con el mismo
+    reparto. Con stratify, train y test tienen el mismo porcentaje de cancelaciones, y
+    con la semilla fija el reparto sale igual en cada ejecución.
     """
     return train_test_split(
         X, y,
@@ -132,72 +116,55 @@ def particionar(X, y):
 
 
 def _columna_a_texto(col: pd.Series) -> pd.Series:
-    """Una columna de _a_texto, valor a valor: cada número pasa por entero antes del texto.
+    """Pasa una columna a texto valor a valor, convirtiendo antes cada número a entero.
 
-    Valor a valor y no columna a columna: si se decidiera para la columna entera, un solo
-    "NULL" escrito como texto en un lote de inferencia haría que el 9.0 de la fila de al
-    lado se quedara en "9.0" y cayera en el cajón de infrecuentes. La codificación de una
-    reserva no puede depender de qué otras reservas lleguen con ella.
-
-    El texto se compara sin espacios alrededor: " PRT " es "PRT", como lo aprendió el
-    train.
+    Va valor a valor para que la codificación de una reserva no dependa de las demás del
+    lote: si se decidiera por columna, un solo "NULL" de texto al predecir dejaría el
+    9.0 de otra fila como "9.0" y acabaría en el cajón de infrecuentes. También se
+    quitan los espacios de alrededor (" PRT " pasa a "PRT", como en el train).
     """
     texto = col.astype(object).astype(str).str.strip()
     numeros = pd.to_numeric(col, errors="coerce").astype(float)
-    # Solo los números que caben en un entero: un "inf" o un 1e20 no son el ID de nadie,
-    # se quedan como texto y caen en el cajón en vez de tumbar el lote entero.
+    # Solo convierto los números que caben en un entero: un "inf" o un 1e20 no son
+    # un ID, así que se quedan como texto y van al cajón en vez de dar error.
     es_numero = numeros.abs() < 2**63
     texto[es_numero] = numeros[es_numero].round().astype("Int64").astype(str)
-    # El nulo tal como lo escribe NA_VALUES: NaN o None de verdad, o uno de esos textos
-    # ("NULL", "", ...) llegado de un JSON o de un formulario sin pasar por cargar_crudo().
+    # Nulo: NaN o None, o uno de los textos de NA_VALUES ("NULL", "", ...) que llegue al
+    # predecir (por ejemplo, desde un JSON) sin pasar por cargar_crudo().
     return texto.mask(col.isna() | texto.isin(NA_VALUES), "desconocido")
 
 
 def _a_texto(X: pd.DataFrame) -> pd.DataFrame:
-    """Pasa a texto las columnas de alta cardinalidad, con "desconocido" por nulo.
+    """Pasa a texto country, agent y company, con "desconocido" en los nulos.
 
-    Hace falta porque las tres no son del mismo tipo: country es texto, pero agent y
-    company son float64 (IDs numéricos con nulos). Sin esto, el imputador de constante
-    revienta al meter la cadena "desconocido" en una columna numérica.
-
-    Los IDs pasan a entero ANTES de convertirse en texto. Si no, el agente 9 del CSV
-    (float64) se aprende como "9.0", y una reserva que llega en inferencia con agent=9
-    (un int, como sale de un JSON) se convierte en "9", no coincide con nada y cae en
-    silencio en el cajón de infrecuentes. Así, 9, 9.0 y "9" son todos "9".
-
-    Y el nulo se convierte en categoría a propósito, no por comodidad: que no haya
-    agente significa que la reserva es directa, y que no haya empresa significa que no
-    es un viaje corporativo. Imputar ahí la moda sería inventarse un intermediario.
-    En agent (13,7 % de nulos en train) y company (94,1 %) "desconocido" tiene columna
-    propia; en country (0,5 %) no llega al top y cae en el cajón de infrecuentes.
-
-    Va como función del módulo y no como lambda porque joblib guarda el Pipeline
-    entero, y una lambda no se puede serializar.
+    agent y company son float64 (IDs con nulos), así que cada ID pasa antes a entero: si
+    no, el agente 9 se aprendería como "9.0" y un agent=9 al predecir no coincidiría.
+    El nulo es una categoría más porque tiene significado: sin agente, la reserva es
+    directa, y sin empresa, no es un viaje de empresa. Es una función y no una lambda
+    porque joblib no puede guardar una lambda dentro del Pipeline.
     """
     return X.apply(_columna_a_texto)
 
 
 def construir_preprocesador(X_train) -> ColumnTransformer:
-    """Devuelve el ColumnTransformer SIN ajustar.
+    """Devuelve el ColumnTransformer sin ajustar, con tres ramas.
 
-    Sin ajustar a propósito: lo ajusta el Pipeline dentro de cada fit, solo con
-    el train de ese fold. Eso es lo que impide la fuga de preprocesado.
+      - numéricas: imputar con la mediana y escalar.
+      - categóricas: imputar con "desconocido" y one-hot (handle_unknown="ignore").
+      - alta cardinalidad (country, agent, company): top-10 y el resto agrupado.
 
-    Ramas:
-      - numéricas    -> imputar (mediana) + escalar
-      - categóricas  -> imputar (constante) + one-hot con handle_unknown="ignore"
-      - alta cardinalidad (country, agent, company) -> top-N + un cajón para el resto
+    Se devuelve sin ajustar porque lo ajusta el Pipeline en cada fit, solo con el train
+    de cada fold; así no hay fuga en el preprocesado.
     """
-    # El reparto se hace en este orden a propósito: alta cardinalidad escoge primero,
-    # porque agent y company son float64 y "numéricas" se las llevaría a escalar como
-    # si el agente 240 fuera el doble del 120.
+    # Las de alta cardinalidad van primero: agent y company son float64 y, si no, irían
+    # a las numéricas y se escalarían como si el agente 240 fuera el doble del 120.
     alta = [c for c in config.ALTA_CARDINALIDAD if c in X_train.columns]
     numericas = [c for c in X_train.select_dtypes(include="number").columns if c not in alta]
     categoricas = [c for c in X_train.select_dtypes(include=["object", "category", "bool"]).columns
                    if c not in alta]
 
-    # remainder="drop" tiraría sin avisar una columna de un tipo no previsto (una fecha,
-    # por ejemplo). Mejor que reviente aquí que perder una predictora en silencio.
+    # Con remainder="drop", una columna de un tipo no previsto (una fecha, por ejemplo)
+    # se perdería sin avisar, así que prefiero que dé error aquí.
     sin_rama = [c for c in X_train.columns if c not in {*alta, *numericas, *categoricas}]
     if sin_rama:
         raise ValueError(f"columnas sin rama en el preprocesador: {sin_rama}")
@@ -208,17 +175,16 @@ def construir_preprocesador(X_train) -> ColumnTransformer:
         ("escalar", StandardScaler()),
     ])
 
-    # handle_unknown="ignore": si en un fold de validación aparece una categoría que el
-    # train de ese fold no vio, sale una fila de ceros en vez de una excepción a mitad
-    # de la validación cruzada.
+    # handle_unknown="ignore": una categoría que el train del fold no ha visto se
+    # codifica como ceros en vez de dar error a mitad de la validación cruzada.
     rama_categoricas = Pipeline([
         ("imputar", SimpleImputer(strategy="constant", fill_value="desconocido")),
         ("onehot", OneHotEncoder(handle_unknown="ignore", sparse_output=False)),
     ])
 
-    # max_categories = TOP_N + 1 porque el cajón del resto ocupa una de las plazas: con
-    # 10 pelados se quedarían 9 países y el cajón. Las categorías raras y las que no se
-    # vieron nunca ("infrequent_if_exist") van a parar a esa misma columna.
+    # max_categories = TOP_N + 1 porque el cajón del resto cuenta como una categoría:
+    # con 10 quedarían 9 valores y el cajón. Con "infrequent_if_exist", las categorías
+    # que no se vieron al entrenar también van al cajón.
     rama_alta_cardinalidad = Pipeline([
         ("a_texto", FunctionTransformer(_a_texto, feature_names_out="one-to-one")),
         ("onehot", OneHotEncoder(
@@ -239,15 +205,14 @@ def construir_preprocesador(X_train) -> ColumnTransformer:
 
 
 def preparar() -> dict:
-    """Punto de entrada del módulo: del CSV a todo lo que necesita el resto.
+    """Carga y limpia el CSV, lo parte en train y test y crea el preprocesador.
 
     Devuelve un dict con X_train, X_test, y_train, y_test y el preprocesador.
     """
     df = limpiar(cargar_crudo())
 
-    # config.DEMO se lee AQUÍ, en tiempo de ejecución, y no con un `from .config import
-    # DEMO` arriba: main.py lo pone a True DESPUÉS de importar este módulo, así que una
-    # copia hecha en el import valdría False para siempre y --demo no haría nada.
+    # config.DEMO se lee aquí y no con `from .config import DEMO` arriba: main.py lo
+    # cambia después de importar este módulo, y una copia del import no vería el cambio.
     if config.DEMO:
         n = min(config.DEMO_FILAS, len(df))
         df = df.sample(n=n, random_state=config.SEMILLA).reset_index(drop=True)
@@ -263,6 +228,6 @@ def preparar() -> dict:
         "X_test": X_test,
         "y_train": y_train,
         "y_test": y_test,
-        # Sin ajustar: lo ajusta cada Pipeline en su fold. Ver el docstring de arriba.
+        # Sin ajustar: se ajusta dentro del Pipeline en cada fold.
         "preprocesador": construir_preprocesador(X_train),
     }

@@ -1,8 +1,8 @@
-"""Tests del registro de modelos.
+"""Tests de model_trainer: el registro de modelos, la comparación y el guardado.
 
-El registro es la pieza que imita a una librería de AutoML, así que lo que se
-prueba es el CONTRATO: que las seis clases son intercambiables. Si una se sale
-del contrato, el bucle comparador falla con un mensaje que no dice nada.
+El registro imita a las librerías de AutoML, así que lo principal es comprobar que las
+seis clases son intercambiables: si una no sigue la interfaz común, el bucle que las
+compara falla con un mensaje poco claro.
 
     python -m pytest tests/test_model_trainer.py -q
 """
@@ -24,14 +24,14 @@ from src import config, data_loader, model_trainer
 
 
 def test_todos_los_modelos_activos_estan_en_el_registro():
-    """config.MODELOS_ACTIVOS y REGISTRO no pueden divergir sin que alguien se entere."""
+    """Todos los modelos de config.MODELOS_ACTIVOS están en el REGISTRO."""
     for nombre in config.MODELOS_ACTIVOS:
         assert nombre in model_trainer.REGISTRO
 
 
 @pytest.mark.parametrize("nombre", config.MODELOS_ACTIVOS)
 def test_cada_modelo_cumple_la_interfaz(nombre):
-    """Mismo contrato para los seis: construir(), fit, predict y predict_proba."""
+    """Cada modelo se llama como su clave y tiene los métodos de la interfaz común."""
     modelo = model_trainer.REGISTRO[nombre]()
     assert modelo.nombre == nombre
     for metodo in ("construir", "fit", "predict", "predict_proba", "espacio_busqueda"):
@@ -40,17 +40,20 @@ def test_cada_modelo_cumple_la_interfaz(nombre):
 
 @pytest.mark.parametrize("nombre", config.MODELOS_ACTIVOS)
 def test_clone_funciona(nombre):
-    """clone() es lo que usa la validación cruzada por dentro para dar a cada fold
-    un modelo virgen. Falla si __init__ hace algo más que guardar hiperparámetros:
-    justo la trampa de construir la red de Keras en __init__ en vez de en fit."""
+    """clone() funciona con cada modelo del registro.
+
+    La validación cruzada usa clone() para dar a cada fold un modelo sin entrenar, y
+    falla si __init__ hace algo más que guardar hiperparámetros, por ejemplo construir
+    la red de Keras en __init__ en vez de en fit."""
     modelo = model_trainer.REGISTRO[nombre]()
     assert clone(modelo) is not modelo
 
 
 def test_el_espacio_de_busqueda_usa_la_sintaxis_de_pipeline():
-    """Las claves van como paso__hiperparametro; sin el prefijo, GridSearchCV no
-    encuentra el tornillo y revienta en tiempo de ejecución, no al escribirlo. Y el
-    tornillo tiene que existir: set_params valida cada clave igual que la búsqueda."""
+    """Las claves de cada rejilla usan paso__hiperparametro y existen en el Pipeline.
+
+    Sin el prefijo, GridSearchCV no encuentra el hiperparámetro y falla al ejecutarse,
+    no al escribir la rejilla. set_params valida cada clave igual que la búsqueda."""
     for nombre in config.MODELOS_ACTIVOS:
         clase = model_trainer.REGISTRO[nombre]
         rejilla = clase().espacio_busqueda()
@@ -64,8 +67,9 @@ def test_el_espacio_de_busqueda_usa_la_sintaxis_de_pipeline():
 
 @pytest.fixture(scope="module")
 def juguete():
-    """400 filas numéricas, ya "preprocesadas", con el reparto de clases del problema.
-    Para probar el contrato no hace falta el CSV: con esto la red entrena en segundos."""
+    """400 filas numéricas inventadas, con el reparto de clases del problema.
+
+    Para probar la interfaz no hace falta el CSV, y así la red entrena en segundos."""
     X, y = make_classification(n_samples=400, n_features=6, weights=[0.72],
                                random_state=config.SEMILLA)
     return X, y
@@ -73,11 +77,12 @@ def juguete():
 
 @pytest.mark.parametrize("nombre", config.MODELOS_ACTIVOS)
 def test_predict_proba_da_dos_columnas_y_la_1_es_cancela(nombre, juguete):
-    """main.py hace predict_proba(...)[:, 1]. Si un modelo devolviera un vector plano,
-    el índice fallaría; si devolviera las columnas al revés, no fallaría nada y el AUC
-    saldría por debajo de 0,5. Por eso no basta con la forma: la columna 1 tiene que
-    ordenar las reservas muy por encima del azar, y predict (del que salen F1, precision
-    y recall en la validación cruzada) tiene que decir lo mismo que ella."""
+    """predict_proba da dos columnas, la 1 es «cancela» y predict coincide con ella.
+
+    main.py usa predict_proba(...)[:, 1]: con un vector plano el índice fallaría, y con
+    las columnas al revés no fallaría nada pero el AUC saldría por debajo de 0,5. Por
+    eso la columna 1 tiene que ordenar las reservas muy por encima del azar, y predict
+    (de donde salen F1, precision y recall en la validación cruzada) debe coincidir."""
     X, y = juguete
     modelo = model_trainer.REGISTRO[nombre]()
     assert modelo.fit(X, y) is modelo
@@ -96,9 +101,11 @@ def test_predict_proba_da_dos_columnas_y_la_1_es_cancela(nombre, juguete):
 
 @pytest.mark.parametrize("nombre", [n for n in config.MODELOS_ACTIVOS if n != "red_keras"])
 def test_dos_modelos_nuevos_dan_lo_mismo(nombre, juguete):
-    """La semilla de config llega a cada estimador: sin ella, la tabla y las cifras del
-    README cambiarían de una ejecución a otra. La red tiene su propio test más abajo.
-    atol y no igualdad exacta: el bosque suma en paralelo y el orden mueve el 1e-16."""
+    """Dos modelos nuevos con los mismos datos dan las mismas probabilidades.
+
+    La semilla de config llega a cada estimador; sin ella, la tabla y las cifras del
+    README cambiarían entre ejecuciones. Uso atol y no igualdad exacta porque el bosque
+    suma en paralelo y el orden cambia el 1e-16. La red tiene su propio test abajo."""
     X, y = juguete
     a = model_trainer.REGISTRO[nombre]().fit(X, y).predict_proba(X)
     b = model_trainer.REGISTRO[nombre]().fit(X, y).predict_proba(X)
@@ -106,10 +113,12 @@ def test_dos_modelos_nuevos_dan_lo_mismo(nombre, juguete):
 
 
 def test_la_red_se_reconstruye_en_cada_fit(juguete):
-    """La trampa del proyecto. Si la red se construyera una sola vez, el segundo fit
-    seguiría entrenando la del primero: saldría otra red, mejor en apariencia, y en la
-    validación cruzada cada fold arrancaría con lo aprendido en los anteriores. Con la
-    red nueva en cada fit y la semilla fijada, dos fit y un clon dan la misma red."""
+    """Dos fit seguidos de la misma red, y un clon, dan exactamente lo mismo.
+
+    La red se construye en fit y no en __init__. Si se construyera una sola vez, el
+    segundo fit seguiría entrenando la del primero (saldría otra red, en apariencia
+    mejor) y en la validación cruzada cada fold empezaría con lo aprendido en los
+    anteriores. Con la red nueva en cada fit y la semilla fijada, las tres coinciden."""
     X, y = juguete
     red = model_trainer.RedKeras(epocas=3)
     primera = red.fit(X, y).predict_proba(X)
@@ -120,10 +129,11 @@ def test_la_red_se_reconstruye_en_cada_fit(juguete):
 
 
 def test_la_red_lee_el_modo_demo_al_entrenar(juguete, monkeypatch):
-    """main.py pone config.DEMO = True después de importar los módulos. La red tiene
-    que leerlo en fit, o --demo entrenaría las épocas completas y dejaría de ser la
-    versión corta. Y sin validation_split no habría val_loss que vigilar: EarlyStopping
-    no pararía nunca."""
+    """La red lee config.DEMO en fit y entrena con validation_split.
+
+    main.py pone config.DEMO = True después de importar los módulos; si la red no lo
+    leyera en fit, --demo entrenaría todas las épocas y dejaría de ser la versión
+    corta. Sin validation_split no habría val_loss y EarlyStopping no pararía nunca."""
     X, y = juguete
     monkeypatch.setattr(config, "DEMO", True)
     red = model_trainer.RedKeras(epocas=50, paciencia=50).fit(X, y)
@@ -132,9 +142,10 @@ def test_la_red_lee_el_modo_demo_al_entrenar(juguete, monkeypatch):
 
 
 def test_la_red_se_queda_con_los_mejores_pesos(juguete):
-    """EarlyStopping con restore_best_weights: la red que queda es la de la mejor época
-    de validación (el último 10 % del train, que es lo que aparta validation_split), no
-    la de la última."""
+    """Con restore_best_weights, la red se queda con la mejor época, no con la última.
+
+    La mejor época se mide en validación, que es el último 10 % del train (lo que
+    aparta validation_split)."""
     X, y = juguete
     red = model_trainer.RedKeras(epocas=60, paciencia=2, learning_rate=0.05).fit(X, y)
     historia = red.model_.history.history["val_loss"]
@@ -149,8 +160,9 @@ def test_la_red_se_queda_con_los_mejores_pesos(juguete):
 
 @pytest.fixture(scope="module")
 def comparacion():
-    """entrenar_y_comparar() una sola vez, en modo demo y con tres modelos rápidos. El
-    protocolo es el mismo para los seis, y la red ya tiene arriba sus propios tests."""
+    """Ejecuta entrenar_y_comparar() una vez, en modo demo y con tres modelos rápidos.
+
+    El protocolo es el mismo para los seis, y la red tiene sus propios tests arriba."""
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(config, "DEMO", True)
         mp.setattr(config, "MODELOS_ACTIVOS", ["baseline", "logistica", "arbol"])
@@ -161,8 +173,8 @@ def comparacion():
 
 
 def test_la_tabla_trae_una_fila_por_modelo_ordenada(comparacion):
-    """Una fila por modelo activo, con su media y su desviación en cada métrica, y
-    ordenada por la principal: la primera fila es la del ganador."""
+    """La tabla tiene una fila por modelo activo, con la media y la desviación de cada
+    métrica, y está ordenada por la principal: la primera fila es la del ganador."""
     _, tabla, modelos = comparacion
     assert set(tabla.index) == set(modelos) == {"baseline", "logistica", "arbol"}
     assert tabla[config.METRICA_PRINCIPAL].is_monotonic_decreasing
@@ -172,9 +184,10 @@ def test_la_tabla_trae_una_fila_por_modelo_ordenada(comparacion):
 
 
 def test_el_baseline_es_la_linea_del_suelo(comparacion):
-    """El baseline dice siempre «no cancela»: F1 0, AUC 0,5 y una accuracy igual al
-    reparto de clases. Si no, no es la línea del suelo. Y los modelos de verdad tienen
-    que quedar por encima en la métrica principal."""
+    """El baseline da F1 0, AUC 0,5 y una accuracy igual al porcentaje de «no cancela».
+
+    Es la referencia: dice siempre «no cancela», y los demás modelos tienen que quedar
+    por encima en la métrica principal."""
     d, tabla, _ = comparacion
     suelo = tabla.loc["baseline"]
     assert suelo["f1"] == 0 and suelo["roc_auc"] == 0.5
@@ -183,9 +196,10 @@ def test_el_baseline_es_la_linea_del_suelo(comparacion):
 
 
 def test_cada_modelo_sale_ajustado_con_su_propio_preprocesador(comparacion):
-    """Los pipelines se devuelven ajustados con todo el train (hacen falta para la ROC).
-    Si compartieran el preprocesador, el refit de uno reajustaría el de los demás; y el
-    de preparar() tiene que seguir sin ajustar."""
+    """Cada Pipeline sale ajustado con todo el train y con su propio preprocesador.
+
+    Hacen falta ajustados para la ROC. Si compartieran el preprocesador, el refit de
+    uno reajustaría el de los demás; y el de preparar() tiene que seguir sin ajustar."""
     d, _, modelos = comparacion
     preprocesadores = [p.named_steps["prep"] for p in modelos.values()]
     assert len({id(p) for p in preprocesadores}) == len(modelos)
@@ -197,11 +211,12 @@ def test_cada_modelo_sale_ajustado_con_su_propio_preprocesador(comparacion):
 
 
 def test_mismo_protocolo_para_todos(comparacion, monkeypatch):
-    """Lo que hace justa la comparación: los mismos folds (los de --demo, estratificados
-    y con la misma semilla) para todos, la red en un solo proceso, un fold que falla
-    que para la ejecución en vez de convertirse en NaN, y la tabla con la media y la
-    desviación de ESOS folds. cross_validate se sustituye por un espía que no entrena:
-    apunta con qué se le llamó y devuelve un valor distinto en cada fold."""
+    """Todos los modelos se validan con los mismos folds y las mismas reglas.
+
+    Mismos folds para todos (los de --demo, estratificados y con la misma semilla), la
+    red en un solo proceso, un fold que falla para la ejecución en vez de dar NaN, y la
+    tabla lleva la media y la desviación de esos folds. cross_validate se cambia por un
+    espía que no entrena: guarda con qué se le llamó y da un valor distinto por fold."""
     d, _, _ = comparacion
     X, y = d["X_train"].iloc[:1500], d["y_train"].iloc[:1500]
     monkeypatch.setattr(config, "DEMO", True)
@@ -237,8 +252,10 @@ def test_mismo_protocolo_para_todos(comparacion, monkeypatch):
 
 
 def test_elegir_mejor_lee_la_metrica_de_config(monkeypatch):
-    """El ganador sale de la columna que diga config.METRICA_PRINCIPAL, no de un "f1"
-    escrito a mano: si la métrica cambia, el ganador cambia sin tocar el código."""
+    """elegir_mejor() elige por la columna de config.METRICA_PRINCIPAL.
+
+    No usa un "f1" escrito a mano: si cambia la métrica, cambia el ganador sin tocar
+    el código."""
     tabla = pd.DataFrame({"f1": [0.60, 0.55], "roc_auc": [0.85, 0.90]},
                          index=pd.Index(["a", "b"], name="modelo"))
     assert model_trainer.elegir_mejor(tabla) == "a"
@@ -249,11 +266,12 @@ def test_elegir_mejor_lee_la_metrica_de_config(monkeypatch):
 @pytest.mark.parametrize("busqueda,clase", [("grid", "GridSearchCV"),
                                              ("random", "RandomizedSearchCV")])
 def test_la_busqueda_se_activa_desde_config(busqueda, clase, monkeypatch):
-    """config.BUSQUEDA promete que activar la búsqueda es cambiar una línea. Con ella, el
-    comparador tiene que lanzar DE VERDAD el buscador, elegir por la métrica principal,
-    devolver su Pipeline ganador y poner en la tabla los folds de ESA combinación. Con
-    max_depth 1 contra 8 el ganador no tiene discusión. El baseline, sin rejilla, se
-    valida tal cual y no lanza ningún buscador."""
+    """Con config.BUSQUEDA, el comparador lanza de verdad el buscador correspondiente.
+
+    El buscador elige por la métrica principal (y no por accuracy, que es lo que usaría
+    por defecto), devuelve su mejor Pipeline y la tabla recoge los folds de esa
+    combinación. Con max_depth 1 contra 8 el ganador está claro. El baseline no tiene
+    rejilla y se valida sin buscador."""
     monkeypatch.setattr(config, "DEMO", True)
     monkeypatch.setattr(config, "BUSQUEDA", busqueda)
     monkeypatch.setattr(config, "N_ITER_RANDOM", 30)
@@ -286,9 +304,10 @@ def test_la_busqueda_se_activa_desde_config(busqueda, clase, monkeypatch):
 
 def test_guardar_deja_el_pipeline_completo_y_sus_metadatos(comparacion, tmp_path,
                                                            monkeypatch):
-    """Lo que se guarda es el Pipeline ENTERO: recargado, predice lo mismo sobre reservas
-    crudas. Y los metadatos llevan lo que predictor necesita para no adivinar nada. El
-    umbral se mueve de 0,50 para que un 0,5 escrito a mano no pase por bueno."""
+    """guardar() guarda el Pipeline completo y los metadatos que necesita predictor.
+
+    Recargado, el Pipeline predice lo mismo sobre reservas sin preprocesar. El umbral
+    se cambia de 0,50 para que un 0,5 escrito a mano no pase el test."""
     d, _, modelos = comparacion
     monkeypatch.setattr(config, "UMBRAL", 0.35)
     ruta = model_trainer.guardar(modelos["arbol"], "arbol", {"f1": np.float64(0.6)},
@@ -310,9 +329,11 @@ def test_guardar_deja_el_pipeline_completo_y_sus_metadatos(comparacion, tmp_path
 
 
 def test_guardar_que_falla_no_deja_un_artefacto_a_medias(comparacion, tmp_path):
-    """Si los metadatos no se pueden escribir (una métrica que no es un número), el
-    artefacto anterior tiene que quedarse entero. Lo peligroso sería el .pkl nuevo al
-    lado de los metadatos del ganador anterior: predictor lo cargaría sin error."""
+    """Si guardar() falla, el modelo que ya estaba guardado queda como estaba.
+
+    Aquí falla al escribir los metadatos (una métrica que no es un número). El caso
+    peligroso sería un .pkl nuevo junto a los metadatos del ganador anterior, porque
+    predictor lo cargaría sin ningún error."""
     _, _, modelos = comparacion
     ruta = model_trainer.guardar(modelos["arbol"], "arbol", {"f1": 0.6},
                                  tmp_path / "mejor_modelo.pkl")
@@ -325,10 +346,11 @@ def test_guardar_que_falla_no_deja_un_artefacto_a_medias(comparacion, tmp_path):
 
 
 def test_guardar_la_red_va_en_dos_ficheros(comparacion, tmp_path):
-    """Si gana la red: el .keras con la red y el .pkl con el resto del Pipeline. La red
-    que sigue en memoria no se toca, el .pkl no la lleva dentro, y sin cargar_aparte el
-    error dice qué falta. Si después gana otro modelo en la misma carpeta, el .keras
-    viejo no se puede quedar al lado."""
+    """Si gana la red, va a un .keras aparte y el resto del Pipeline al .pkl.
+
+    La red en memoria no se modifica, el .pkl no la lleva dentro y, sin cargar_aparte,
+    el error dice qué falta. Si después gana otro modelo en la misma carpeta, el .keras
+    antiguo no se puede quedar al lado."""
     d, _, modelos = comparacion
     X, y = d["X_train"].iloc[:2000], d["y_train"].iloc[:2000]
     pipeline = Pipeline([("prep", clone(d["preprocesador"])),

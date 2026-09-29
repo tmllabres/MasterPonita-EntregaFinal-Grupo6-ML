@@ -1,11 +1,11 @@
-"""Código fuente del sistema de comparación de modelos de cancelación de reservas.
+"""Código del proyecto de predicción de cancelaciones de reservas de hotel.
 
     src/
-    ├── config.py         parámetros y rutas: todo número que se pueda cambiar
-    ├── data_loader.py    cargar, limpiar, partir y construir el preprocesador
-    ├── model_trainer.py  el registro de modelos y el bucle que los compara
-    ├── evaluator.py      métricas y figuras; el único que abre el test
-    └── predictor.py      inferencia con el modelo ya entrenado
+    ├── config.py         parámetros: rutas, semilla, métrica, umbral...
+    ├── data_loader.py    carga, limpieza, partición y preprocesado
+    ├── model_trainer.py  los modelos y su comparación
+    ├── evaluator.py      métricas y figuras sobre el test
+    └── predictor.py      predicciones con el modelo guardado
 
-El orquestador es main.py, en la raíz.
+main.py, en la raíz, llama a estos módulos en orden.
 """
