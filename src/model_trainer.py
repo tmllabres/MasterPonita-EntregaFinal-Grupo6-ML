@@ -85,8 +85,9 @@ class ModeloBase(BaseEstimator, ClassifierMixin):
     def fit(self, X, y):
         """Construye un estimador nuevo, lo entrena y devuelve self.
 
-        Se construye en cada fit para que dos fit seguidos no compartan nada: clone()
-        da por hecho que cada fold recibe un modelo sin entrenar.
+        Se construye en cada fit para que dos fit seguidos no compartan nada y para
+        que use los hiperparámetros que tenga en ese momento (set_params() los cambia
+        después de crear el objeto).
         """
         self.model_ = self.construir()
         self.model_.fit(X, y)
@@ -236,9 +237,10 @@ class Boosting(ModeloBase):
 class RedKeras(ModeloBase):
     """MLP con Keras adaptado a la interfaz de scikit-learn.
 
-    La red se construye en fit y no en __init__: si no, la misma red pasaría de un fold
-    a otro y, como el fit de Keras no reinicia los pesos, un fold empezaría habiendo
-    visto ya sus datos de validación. El F1 saldría inflado sin dar ningún error.
+    La red se construye en fit y no en __init__. clone() y GridSearchCV crean el objeto
+    y después cambian sus hiperparámetros con set_params(); una red ya construida no se
+    enteraría. Además, el fit de Keras no reinicia los pesos: un segundo fit sobre la
+    misma red seguiría entrenándola en lugar de empezar de cero.
 
     EarlyStopping usa el último 10 % del train de cada fit para decidir cuándo parar y
     se queda con los pesos de la mejor época, no con los de la última.

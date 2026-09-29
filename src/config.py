@@ -4,6 +4,7 @@ Reúno aquí las rutas, la semilla, la métrica, el umbral, los folds y el modo 
 poder cambiarlos en un solo sitio. Las rejillas de hiperparámetros están en cada modelo,
 en src/model_trainer.py (apartado 11 del README).
 """
+import os
 from pathlib import Path
 
 # ── Rutas ────────────────────────────────────────────────────────────────────
@@ -114,7 +115,11 @@ TOP_IMPORTANCIAS = 15
 # final es la del test (apartado 10 del README).
 BUSQUEDA = "grid"         # "grid" | "random" | None
 N_ITER_RANDOM = 10        # solo si BUSQUEDA == "random"
-N_JOBS = -1               # la red usa siempre 1 proceso: ver RedKeras.procesos()
+# Procesos en paralelo: como mucho 8. Con todos los núcleos (28 en mi ordenador), la
+# búsqueda de XGBoost se quedaba sin memoria virtual en Windows y fallaba con un
+# «access violation». Usar menos procesos no cambia los resultados, solo el tiempo.
+# La red usa siempre 1 proceso: ver RedKeras.procesos().
+N_JOBS = min(8, os.cpu_count() or 1)
 
 # ── Qué modelos entran en la comparación ─────────────────────────────────────
 # El bucle de model_trainer recorre esta lista: añadir un modelo es añadir una línea.
