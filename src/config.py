@@ -131,6 +131,12 @@ METRICAS_SECUNDARIAS = ["accuracy", "precision", "recall", "roc_auc"]
 CV_FOLDS = 5              # StratifiedKFold dentro del train
 UMBRAL = 0.50             # el de la librería; si lo mueves, dilo y justifícalo
 
+# Importancia de variables: evaluator.importancias() baraja cada variable del test y
+# mide cuánto cae la métrica principal. Más repeticiones = barras de error más fiables
+# y más tiempo. La figura enseña las TOP primeras; la tabla que devuelve, todas.
+IMPORTANCIA_REPETICIONES = 5
+TOP_IMPORTANCIAS = 15
+
 # ── Ajuste de hiperparámetros ────────────────────────────────────────────────
 # DESACTIVADO a propósito para la entrega del 15 de septiembre.
 #
