@@ -22,12 +22,17 @@ from sklearn.preprocessing import FunctionTransformer, OneHotEncoder, StandardSc
 
 from . import config
 
-# Los nulos del CSV vienen escritos como el texto "NULL": country (488), agent (16.340)
-# y company (112.593). pandas ya trata "NULL", "null" y "" como nulo por defecto, así
-# que hoy esta lista no cambia el resultado (comprobado: con y sin ella sale el mismo
-# DataFrame). Se deja explícita para que la decisión se vea aquí y no dependa de la
-# lista por defecto de pandas; " " no está en esa lista y se añade por si acaso.
-NA_VALUES = ["NULL", "null", "", " "]
+# Los nulos del CSV vienen escritos de dos formas: como el texto "NULL" en country (488),
+# agent (16.340) y company (112.593), y como "NA" en children (4). pandas ya trata todos
+# como nulo por defecto, así que hoy esta lista no cambia el resultado (comprobado: con y
+# sin ella sale el mismo DataFrame). Se deja explícita para que la decisión se vea aquí y
+# no dependa de la lista por defecto de pandas; " " no está en esa lista y se añade por
+# si acaso. "NA" no le quita nada a country: ningún país del CSV tiene ese código.
+#
+# Ojo si se recorta: _columna_a_texto usa la misma lista para reconocer el nulo escrito
+# como texto en un lote de inferencia, y ahí sí cambia el resultado. Un "NULL" que no
+# esté en la lista cae en el cajón de infrecuentes en vez de en "desconocido".
+NA_VALUES = ["NULL", "null", "NA", "", " "]
 
 # Las tres columnas que definen "reserva sin huéspedes". Se suman las tres: una
 # reserva de 0 adultos pero 2 niños es rara, pero no es imposible.
@@ -42,8 +47,9 @@ def _miles(n: int) -> str:
 def cargar_crudo(ruta=None) -> pd.DataFrame:
     """Lee el CSV tal cual viene, sin tocar nada.
 
-    Ojo con los nulos: `country`, `agent` y `company` traen el texto "NULL". pandas ya
-    lo lee como NaN por defecto; NA_VALUES lo deja escrito para no depender de eso.
+    Ojo con los nulos: `country`, `agent` y `company` traen el texto "NULL", y `children`
+    el texto "NA". pandas ya los lee como NaN por defecto; NA_VALUES lo deja escrito para
+    no depender de eso.
     """
     return pd.read_csv(config.DATA_RAW if ruta is None else ruta, na_values=NA_VALUES)
 
@@ -126,12 +132,25 @@ def particionar(X, y):
 
 
 def _columna_a_texto(col: pd.Series) -> pd.Series:
-    """Una columna de _a_texto. Si es de IDs numéricos, pasa por entero antes del texto."""
-    numeros = pd.to_numeric(col, errors="coerce")
-    if (numeros.notna() == col.notna()).all():
-        # Todo lo que no es nulo es un número: es una columna de IDs (agent, company).
-        col = numeros.round().astype("Int64")
-    return col.astype(object).where(col.notna(), "desconocido").astype(str)
+    """Una columna de _a_texto, valor a valor: cada número pasa por entero antes del texto.
+
+    Valor a valor y no columna a columna: si se decidiera para la columna entera, un solo
+    "NULL" escrito como texto en un lote de inferencia haría que el 9.0 de la fila de al
+    lado se quedara en "9.0" y cayera en el cajón de infrecuentes. La codificación de una
+    reserva no puede depender de qué otras reservas lleguen con ella.
+
+    El texto se compara sin espacios alrededor: " PRT " es "PRT", como lo aprendió el
+    train.
+    """
+    texto = col.astype(object).astype(str).str.strip()
+    numeros = pd.to_numeric(col, errors="coerce").astype(float)
+    # Solo los números que caben en un entero: un "inf" o un 1e20 no son el ID de nadie,
+    # se quedan como texto y caen en el cajón en vez de tumbar el lote entero.
+    es_numero = numeros.abs() < 2**63
+    texto[es_numero] = numeros[es_numero].round().astype("Int64").astype(str)
+    # El nulo tal como lo escribe NA_VALUES: NaN o None de verdad, o uno de esos textos
+    # ("NULL", "", ...) llegado de un JSON o de un formulario sin pasar por cargar_crudo().
+    return texto.mask(col.isna() | texto.isin(NA_VALUES), "desconocido")
 
 
 def _a_texto(X: pd.DataFrame) -> pd.DataFrame:

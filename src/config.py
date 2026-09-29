@@ -51,24 +51,30 @@ FUGAS_DIRECTAS = ["reservation_status", "reservation_status_date"]
 #   · assigned_room_type: la habitación se asigna el día de llegada. Es distinta de la
 #     reservada en el 18,8 % de las Check-Out y el 17,2 % de los No-Show, pero solo en
 #     el 1,4 % de las canceladas: quien cancela antes no llega a tener habitación.
-# Con ellas, un gradient boosting sube el F1 en validación cruzada de 0,678 a 0,710
-# sobre las mismas filas: es nota regalada, no la que tendría en producción.
+# Con ellas, un HistGradientBoostingClassifier por defecto (salvo la semilla, 42) sube
+# el F1 en validación cruzada (StratifiedKFold de 5 sobre las 68.648 filas de train, las
+# mismas con y sin las dos columnas) de 0,678 a 0,710; con el XGBoost por defecto, de
+# 0,686 a 0,719. Es nota regalada, no la que tendría en producción.
 FUGAS_POSTERIORES = ["required_car_parking_spaces", "assigned_room_type"]
 
 FUGAS = FUGAS_DIRECTAS + FUGAS_POSTERIORES
 
 # booking_changes se QUEDA, con una duda declarada: el CSV guarda el número FINAL de
-# cambios, y parte de ellos pueden ser posteriores al momento de predecir. No es tan
-# clara como las dos de arriba (con cambios cancela un 15,6 % frente a un 30,3 % en
-# train: separa, pero no a la perfección), y los cambios hechos hasta el momento de
-# predecir sí serían información legítima.
+# cambios, y parte de ellos pueden ser posteriores al momento de predecir. La prueba
+# que delató al parking no la señala: el 14,7 % de los No-Show, que nunca llegan, tienen
+# algún cambio (frente al 20,3 % de las Check-Out), así que no se rellena solo a la
+# llegada. La duda está en las canceladas, con un 6,2 %: parte será que cancelan antes
+# de tener ocasión de cambiar nada, y parte, cambios que aún no existían al predecir.
+# Los cambios hechos hasta el momento de predecir sí serían información legítima, y la
+# duda cuesta poco: sin la columna, el mismo boosting baja de 0,678 a 0,671.
 
 # ── Alta cardinalidad ────────────────────────────────────────────────────────
 # Tres columnas tienen demasiadas categorías para un one-hot directo. En X_train
 # (68.648 filas): country 168 valores, agent 325 y company 320, las tres con nulos.
 # Un one-hot ingenuo de las 27 predictoras se va a 880 columnas (16 numéricas + 864
-# de categorías), casi todas ceros: el árbol y el bosque se comen la memoria y la
-# logística sobreajusta sobre categorías con 3 reservas.
+# de categorías, contando el nulo como una categoría más), casi todas ceros: el árbol
+# y el bosque se comen la memoria y la logística sobreajusta sobre categorías con 3
+# reservas.
 #
 # Se agrupan en las TOP_N_CATEGORIAS más frecuentes y el resto cae en un cajón
 # común, con lo que la matriz se queda en 97 columnas (16 numéricas + 48 de las 8
@@ -108,7 +114,7 @@ ESTRATIFICAR = True       # conserva el mismo reparto de clases en las dos mitad
 #
 # El precio, que se asume: las copias se concentran en reservas de grupo. Se va el
 # 93,1 % de las Non Refund (14.587 -> 1.011) y el 77,6 % del segmento Groups, y la tasa
-# de cancelación del City Hotel baja del 41,73 % al 30,21 %. Algunas serán habitaciones
+# de cancelación del City Hotel baja del 41,73 % al 30,15 %. Algunas serán habitaciones
 # legítimas de un mismo grupo; perderlas es un precio menor que publicar una métrica
 # de test que no es honesta.
 #
