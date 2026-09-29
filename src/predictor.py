@@ -1,11 +1,7 @@
-"""Predicciones con el modelo ya entrenado: el camino de vuelta.
+"""Predicciones con el modelo guardado (la parte de inferencia que pide el enunciado).
 
-Esto es la INFERENCIA, y es lo que cierra el «flujo completo desde los datos hasta
-la inferencia» que pide el enunciado. Este módulo NO entrena, NO evalúa y NO abre
-el CSV de train: carga el artefacto y predice.
-
-La prueba de que el artefacto es usable: alguien que solo tenga models/ y este
-fichero puede predecir una reserva nueva sin reentrenar nada.
+Aquí no se entrena ni se evalúa: se carga el Pipeline de models/ y se predicen reservas
+nuevas sin reentrenar nada. La demo predice unas cuantas reservas del test:
 
     python -m src.predictor
 """
@@ -21,17 +17,12 @@ from . import config
 
 
 def cargar(ruta=None):
-    """Carga el Pipeline entrenado (preprocesado + modelo) y sus metadatos.
+    """Carga el Pipeline entrenado y sus metadatos; devuelve (pipeline, metadatos).
 
-    Lee config.MODELO_PKL y config.METADATOS, los mismos que escribe
-    model_trainer.guardar(). Si el ganador es la red de Keras son DOS ficheros:
-    config.MODELO_KERAS con arquitectura y pesos, y el .pkl con el
-    ColumnTransformer ya ajustado.
-
-    Devuelve (pipeline, metadatos). El umbral sale de los metadatos, NO de
-    config.UMBRAL: el que vale es el que se congeló al entrenar este artefacto. Por eso
-    los metadatos viajan también pegados al pipeline (pipeline.metadatos_), y
-    predecir() los lee de ahí.
+    Si gana la red de Keras, la red va aparte en config.MODELO_KERAS. El umbral se lee
+    de los metadatos (también en pipeline.metadatos_) y no de config.UMBRAL, para usar
+    el mismo con el que se entrenó el modelo. Si no hay modelo guardado, el error dice
+    cómo generarlo.
     """
     ruta = Path(config.MODELO_PKL if ruta is None else ruta)
     ruta_metadatos = ruta.with_name(config.METADATOS.name)
@@ -42,19 +33,18 @@ def cargar(ruta=None):
 
     metadatos = json.loads(ruta_metadatos.read_text(encoding="utf-8"))
     pipeline = joblib.load(ruta)
-    # Los modelos que caben enteros en el .pkl no hacen nada aquí; la red se recupera
-    # de su .keras (ver model_trainer.RedKeras).
+    # Solo hace algo si el modelo es la red, que se carga de su .keras (ver
+    # model_trainer.RedKeras); el resto de modelos van enteros en el .pkl.
     pipeline[-1].cargar_aparte(ruta.with_name(config.MODELO_KERAS.name))
     pipeline.metadatos_ = metadatos
     return pipeline, metadatos
 
 
 def predecir(pipeline, reservas):
-    """Devuelve 0/1 por reserva aplicando el umbral de los metadatos.
+    """Devuelve 0/1 por reserva (1 = cancela) con el umbral de los metadatos.
 
-    Las reservas entran con las MISMAS columnas crudas que el train: el Pipeline
-    se encarga del resto. Si tienes que preparar los datos a mano antes de llamar
-    aquí, es que el preprocesado se quedó fuera del artefacto.
+    Las reservas llegan con las mismas columnas originales que el train: el preprocesado
+    va dentro del Pipeline, así que no hay que preparar nada a mano.
     """
     umbral = _metadatos(pipeline)["umbral"]
     cancela = predecir_proba(pipeline, reservas) >= umbral
@@ -62,33 +52,35 @@ def predecir(pipeline, reservas):
 
 
 def predecir_proba(pipeline, reservas):
-    """Devuelve la probabilidad de cancelación, que es lo que el modelo calcula
-    de verdad. El 0/1 sale luego de comparar contra el umbral."""
+    """Devuelve la probabilidad de cancelación de cada reserva.
+
+    Es lo que calcula el modelo; el 0/1 de predecir() sale de compararla con el umbral.
+    """
     columnas = _metadatos(pipeline)["columnas"]
     faltan = [c for c in columnas if c not in reservas.columns]
     if faltan:
         raise ValueError(f"A las reservas les faltan columnas del modelo: {faltan}")
-    # Solo las columnas del train y en su orden: las que sobren (is_canceled, las de
-    # fuga de un CSV crudo...) no llegan al modelo.
+    # Selecciono las columnas por nombre y en el orden del train, así las que sobren
+    # (is_canceled, las fugas de un CSV sin limpiar...) no llegan al modelo.
     proba = pipeline.predict_proba(reservas[columnas])[:, 1]
     return pd.Series(proba, index=reservas.index, name="prob_cancelacion")
 
 
 def comparar(pipeline, reservas, reales):
-    """Tabla de reservas con la probabilidad, la predicción y lo que pasó de verdad.
-    Es lo que enseñan la demo de este módulo y el último paso de main.py."""
+    """Tabla con la probabilidad, la predicción y el valor real de cada reserva.
+
+    La usan la demo de este módulo y el último paso de main.py.
+    """
     return pd.concat([predecir_proba(pipeline, reservas).round(3),
                       predecir(pipeline, reservas),
                       pd.Series(reales, index=reservas.index, name="real")], axis=1)
 
 
 def demo(n=10):
-    """Coge n reservas del test, les quita la respuesta y las predice con el modelo
-    guardado, con la respuesta real al lado.
+    """Predice n reservas del test con el modelo guardado, junto a su valor real.
 
-    Del TEST y no del CSV entero: son reservas que el modelo no vio al entrenar. Con
-    el modo (demo o completo) con el que se entrenó el artefacto, para que la partición
-    sea la misma que la suya.
+    Son del test porque el modelo no las vio al entrenar. Se usa el mismo modo (demo o
+    completo) con el que se entrenó el modelo, para que la partición sea la misma.
     """
     from . import data_loader  # solo la demo necesita los datos
 
@@ -108,7 +100,7 @@ def demo(n=10):
 
 
 def _metadatos(pipeline) -> dict:
-    """Los metadatos que cargar() dejó pegados al pipeline."""
+    """Devuelve los metadatos que cargar() guarda en el pipeline."""
     if not hasattr(pipeline, "metadatos_"):
         raise ValueError("Este pipeline no trae metadatos: cárgalo con predictor.cargar(), "
                          "que es el que sabe con qué umbral y qué columnas se entrenó.")

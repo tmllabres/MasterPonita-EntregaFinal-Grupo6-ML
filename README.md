@@ -1,17 +1,16 @@
 # Predicción de cancelación de reservas de hotel
 
-Sistema modular que entrena, evalúa y compara cinco modelos de clasificación binaria
-(más un baseline) sobre un conjunto de 119.390 reservas de hotel, selecciona el mejor
-según una métrica justificada, y automatiza el flujo completo desde el CSV crudo hasta
-la inferencia.
+Práctica final de Machine Learning: un sistema que entrena y compara cinco modelos de
+clasificación (más un modelo base de referencia) para predecir si una reserva de hotel
+se va a cancelar, elige el mejor y lo deja guardado para hacer predicciones nuevas.
 
-> **Máster en IA, Cloud Computing y DevOps** · Machine Learning y Deep Learning
-> Práctica de evaluación final · Entrega: 15 de septiembre de 2026
+> **Máster en IA, Cloud Computing y DevOps** · Machine Learning y Deep Learning ·
+> Práctica de evaluación final
 >
 > **Repositorio:** <https://github.com/tmllabres/MasterPonita-ML-EntregaFinal-Grupo6>
 
 Este README es también el informe final: `docs/informe_final.pdf` es este mismo fichero
-exportado.
+exportado a PDF.
 
 ---
 
@@ -22,8 +21,8 @@ exportado.
 | Antonio Martínez Llabrés | tmllabres@gmail.com | `tmllabres` |
 
 La práctica se planteó por parejas, pero el otro integrante la dejó antes de la entrega,
-y así se comunicó al profesor el 29 de septiembre de 2026. Es un trabajo individual:
-todas las partes son del mismo autor, y el historial de commits lo refleja.
+y así se lo comuniqué al profesor el 29 de septiembre de 2026. Es un trabajo individual:
+no hay partes de otro compañero, y el historial de commits lo refleja.
 
 | Parte | Ficheros |
 |---|---|
@@ -37,290 +36,217 @@ todas las partes son del mismo autor, y el historial de commits lo refleja.
 
 ---
 
-## 2. El problema y por qué este dataset
+## 2. El problema y los datos
 
-- **Objetivo:** predecir si una reserva se cancelará (`is_canceled = 1`) o no (`0`).
-- **Tipo de problema:** clasificación binaria supervisada.
-- **Filas del CSV crudo:** 119.390 · **Columnas:** 32 · **Predictoras reales:** 27
-- **Reparto de clases en crudo:** 62,96 % no cancela / 37,04 % cancela (razón 1,70 : 1)
-- **Tras la limpieza:** 85.811 filas · 72,36 % no cancela / 27,64 % cancela (razón 2,62 : 1)
+**Qué quiero predecir:** si una reserva se va a cancelar (`is_canceled = 1`) o no (`0`).
+Es un problema de clasificación binaria supervisada.
 
-El diccionario de variables está en [`docs/diccionario_datos.md`](docs/diccionario_datos.md).
+**Los datos:** el CSV de la práctica, con 119.390 reservas de dos hoteles (uno urbano y
+otro tipo resort) y 32 columnas. En el CSV original cancela el 37,04 % de las reservas.
+Las variables están explicadas en [`docs/diccionario_datos.md`](docs/diccionario_datos.md).
+Me parece un buen dataset para este problema porque son reservas reales, trae la
+respuesta (`is_canceled`) y casi todo lo que el hotel ya sabe al hacerse la reserva: la
+antelación, el canal, el agente, el país o las peticiones especiales.
 
-### Para quién es, y qué decisión cambia
+### Para qué sirve
 
-El destinatario es el departamento de *revenue management* del hotel, y la decisión
-concreta que cambia es **cuántas habitaciones se vuelven a poner a la venta**.
+Lo he planteado pensando en el departamento del hotel que gestiona las reservas y los
+precios. Cuando una reserva se cancela a última hora, la habitación se queda vacía y esa
+noche ya no se puede vender. Si el hotel sabe de antemano qué reservas tienen más
+riesgo de cancelarse, puede hacer overbooking con cuidado, pedir un depósito a esas
+reservas o prepararse para los días con más riesgo.
 
-Una reserva confirmada bloquea inventario. Si esa reserva se va a cancelar y nadie lo sabe
-hasta el día de la llegada, la habitación ya no se puede vender a nadie: el inventario de
-un hotel es perecedero, y la noche del 14 de agosto no se puede vender el día 15. Con una
-probabilidad de cancelación **por reserva** se puede hacer overbooking controlado, decidir
-a quién se le pide prepago o depósito, y dimensionar plantilla y compras en los días de más
-riesgo.
+Sin un modelo, el hotel no puede distinguir unas reservas de otras y las trata todas
+igual. Para comparar, uso un modelo base (`DummyClassifier`) que hace justo eso: dice
+siempre «no cancela», que es lo más frecuente, sin mirar ningún dato de la reserva.
 
-Sin modelo, la única alternativa es aplicar la tasa media de cancelación a todo el mundo
-por igual —que es, literalmente, lo que hace el clasificador trivial contra el que se mide
-el sistema en el apartado 5.
+### Los dos errores posibles
 
-### Qué le cuesta al hotel cada tipo de error
-
-Los dos errores duelen, y no de la misma manera:
-
-| Error | Qué pasa | Qué cuesta |
+| Error | Qué pasa | Qué le cuesta al hotel |
 |---|---|---|
-| **Falso negativo** — se predice «no cancela» y la reserva se cancela | La habitación se queda vacía sin que nadie lo viera venir | La noche entera, y no se recupera: no hubo margen para revenderla |
-| **Falso positivo** — se predice «cancela» y el cliente aparece | El hotel ha revendido una habitación que sí se iba a ocupar y tiene que realojar al huésped | Compensación, traslado a otro establecimiento y una reseña negativa que dura mucho más que la noche |
+| **Falso negativo:** digo que no cancela y sí cancela | La habitación se queda vacía sin que nadie lo espere | La noche entera, que ya no se recupera |
+| **Falso positivo:** digo que cancela y el cliente viene | El hotel ha revendido una habitación que sí se iba a usar | Hay que realojar al cliente y compensarle, y queda mal ante él |
 
-El dataset **no trae el coste en euros de ninguno de los dos**, así que no se puede fijar
-una razón coste-beneficio y optimizar por dinero. De ahí que la métrica del apartado 5 sea
-F1 —que obliga a atender a los dos errores— y no una métrica asimétrica elegida a ojo. Es
-también la limitación que se reconoce en el apartado 10.
+Los dos errores cuestan dinero, pero el dataset no dice cuánto cuesta cada uno. Por eso
+elegí una métrica que tiene en cuenta los dos a la vez (apartado 5).
 
-### Fugas de datos detectadas y eliminadas
+### Fugas de datos
 
-Una fuga es una columna que el modelo no tendría cuando toca predecir. Aquí se predice
-**al hacerse la reserva o en las semanas siguientes, antes de que llegue el cliente**, que
-es cuando revenue management decide el overbooking o el depósito. Todo lo que se escribe a
-la llegada del cliente, o una vez se sabe si canceló, es la respuesta con otras palabras.
+Una fuga es una columna que da la respuesta «por la puerta de atrás»: una información que
+el modelo no tendría en el momento de predecir. Yo quiero predecir al hacerse la reserva
+o en las semanas siguientes, antes de que llegue el cliente.
 
-**Directas.** `reservation_status` y `reservation_status_date` determinan el objetivo al
-100 % (`Check-Out` → 0; `Canceled` y `No-Show` → 1). Si se dejan, los cinco modelos sacan un
-AUC ≈ 1,000 y la comparación no distingue nada.
+- **`reservation_status` y `reservation_status_date`**: la primera dice directamente si
+  la reserva se canceló (`Canceled` o `No-Show` = 1, `Check-Out` = 0), y la segunda es
+  la fecha de ese estado (el día en que se canceló o el día en que el cliente se fue),
+  así que también da la respuesta. Con ellas cualquier modelo acierta casi el 100 %,
+  así que las quité desde el principio.
+- **`required_car_parking_spaces` y `assigned_room_type`**: estas me costó más verlas.
+  De las 7.416 reservas con plaza de parking, ninguna está cancelada, lo que tiene
+  sentido si la plaza se anota cuando el cliente llega con el coche. Con la habitación
+  asignada pasa algo parecido: cambia respecto a la reservada en el 18,8 % de las
+  reservas que se completan y en el 17,2 % de los No-Show, pero solo en el 1,4 % de las
+  que se cancelaron antes de llegar. Como los No-Show también la tienen, deduzco que la
+  habitación se asigna el día de la llegada, y quien cancela antes nunca llega a ese día.
 
-**Posteriores a la llegada.** Otras dos columnas se rellenan cuando el cliente llega, y
-los datos lo delatan (cifras sobre el CSV crudo):
+  Para medir cuánto inflaban el resultado usé un modelo rápido de prueba (el
+  `HistGradientBoostingClassifier` de scikit-learn con sus valores por defecto, en
+  `pruebas_modelos.ipynb`): con estas dos columnas su F1 subía de 0,678 a 0,710, pero
+  era una mejora falsa, así que también las quité.
 
-| Columna | Evidencia | Lectura |
-|---|---|---|
-| `required_car_parking_spaces` | 7.416 reservas con plaza: **0 canceladas y 0 No-Show**. Si se anotara al reservar, cabrían unas 2.670 cancelaciones y 75 No-Show; las peticiones especiales, que sí se hacen al reservar, cancelan un 21,7 % | La plaza se anota cuando el cliente llega en coche: quien no llega, nunca la tiene |
-| `assigned_room_type` | Distinta de la reservada en el 18,8 % de las Check-Out y el 17,2 % de los No-Show, pero **solo en el 1,4 % de las canceladas** | La habitación se asigna el día de llegada (por eso los No-Show sí la tienen); quien cancela antes nunca llega a ese día |
+Me quedan 27 columnas para predecir (32 − la respuesta − 4 fugas). `booking_changes`
+(número de cambios en la reserva) me generó dudas, porque el CSV guarda el número final
+de cambios, y algunos podrían ser posteriores al momento de predecir. La dejé porque no
+se comporta como el parking: también tienen cambios muchas reservas que nunca llegaron
+al hotel (el 14,7 % de los No-Show), así que no se rellena solo al llegar. Además, con
+el modelo de prueba, sin ella el F1 solo baja de 0,678 a 0,671, así que aunque una parte
+fuera fuga pesaría poco.
 
-Con las dos dentro, un `HistGradientBoostingClassifier` por defecto (salvo la semilla, 42)
-sube el F1 en validación cruzada de **0,678 a 0,710**, y el AUC de 0,897 a 0,914. Se mide
-con un `StratifiedKFold` de 5 sobre las 68.648 reservas de train (la partición se explica
-al final de este apartado), las mismas con y sin las dos columnas. Con el XGBoost por
-defecto, el salto es parecido: de 0,686 a 0,719. Es nota regalada: cuando toca predecir,
-nadie tiene todavía plaza anotada ni habitación asignada.
+### Limpieza
 
-**`booking_changes` se queda, con una duda declarada.** El CSV guarda el número *final* de
-cambios, y parte puede ser posterior al momento de predecir. La prueba que delató al
-parking no la señala: en el CSV crudo, el **14,7 % de los No-Show**, que nunca llegan,
-tienen algún cambio (frente al 20,3 % de las Check-Out), así que el campo no se rellena
-solo a la llegada. La duda está en las canceladas, con un 6,2 %: parte será que cancelan
-antes de tener ocasión de cambiar nada, y parte, cambios que todavía no existían al
-predecir. En train, con cambios cancela un 15,6 % y sin cambios un 30,3 %: separa, pero no
-adivina el desenlace. Los cambios hechos hasta el momento de predecir sí son información
-legítima, y la duda cuesta poco: sin la columna, el mismo boosting baja de 0,678 a 0,671.
-Queda como limitación para el apartado 10.
+1. **Duplicados:** después de quitar las 4 columnas de fuga, hay 33.413 filas repetidas
+   exactamente (un 28 % del CSV). Si se miran también las columnas de fuga salen
+   31.994, que es la cifra de `eda_inicial.ipynb`; uso la primera porque el modelo no
+   ve esas columnas. El CSV no tiene un identificador de reserva, así que no se pueden
+   distinguir entre sí. Las
+   quité antes de separar train y test, porque si una copia cae en train y otra en
+   test, el modelo se examina de algo que ya ha visto. Lo comprobé: sin quitarlas, el
+   32,7 % de las filas de test tendrían una copia exacta en train.
+2. **Registros imposibles:** quité 1 reserva con precio negativo y 165 reservas sin
+   ningún huésped (0 adultos, 0 niños y 0 bebés). En el CSV original hay 180 sin
+   huéspedes, que es la cifra de `eda_inicial.ipynb`, pero 15 ya se habían ido con los
+   duplicados.
+3. **Lo que no quité:** las reservas con precio 0 (hay invitaciones del hotel) y una
+   reserva con un precio de 5.400 por noche, que es rarísima pero no imposible.
 
-De ahí la cuenta: **32 − `is_canceled` − 4 de fuga = 27** columnas predictoras. Las cuatro
-están en `config.FUGAS`, con su porqué.
+Después de limpiar quedan **85.811 reservas**, de las que cancela el **27,64 %**. Las
+separo en **68.648 de entrenamiento y 17.163 de test** (80/20), manteniendo el mismo
+porcentaje de cancelaciones en las dos partes (`stratify`).
 
-### Los 33.413 duplicados exactos: se eliminan
+El porcentaje de cancelaciones baja del 37,04 % al 27,64 % porque el 61 % de las filas
+repetidas eran cancelaciones. Por eso el modelo base acierta ahora el 72,36 % (apartado 5).
 
-Son el **28,0 %** del dataset, y el **61,3 %** de ellas son cancelaciones, así que no es una
-decisión menor: mueve la prevalencia del objetivo casi diez puntos.
-
-**Se eliminan.** Qué cuenta como duplicado: dos filas idénticas en las 28 columnas que
-quedan tras quitar las fugas, es decir, en las 27 predictoras **y** en la respuesta. El CSV
-no trae identificador de reserva, así que esas copias no se pueden distinguir entre sí. Las
-filas que coinciden en las 27 predictoras pero acabaron de forma distinta (289 pares, 578
-filas) **se conservan**: esas sí son, con seguridad, reservas distintas.
-
-Dejar las copias tiene un coste asimétrico: si una cae en train y su gemela en test, el
-modelo ya ha visto ese ejemplo exacto y su nota de test sale inflada **sin que salte ningún
-error**. No es una hipótesis: si se parte el CSV sin deduplicar (misma semilla y
-`stratify`), **7.813 de las 23.878 filas de test (32,7 %) tienen una gemela exacta en
-train**, y cancelan un 58,2 % frente al 26,7 % del resto.
-
-El precio, que se asume: las copias se concentran en reservas de grupo. Al deduplicar se va
-el 93,1 % de las reservas `Non Refund` (de 14.587 a 1.011) y el 77,6 % del segmento
-`Groups`, y la tasa de cancelación del City Hotel baja del 41,73 % al 30,15 %. Algunas de
-esas filas serán habitaciones legítimas de un mismo grupo; perderlas es un precio menor que
-publicar una métrica de test que no es honesta.
-
-El orden de la limpieza importa, y está fijado en `data_loader.limpiar()`:
-
-1. **Primero las fugas.** El modelo nunca las ve, así que no pueden decidir qué es un
-   duplicado. Con ellas dentro saldrían 31.994 duplicados en vez de 33.413: 1.419 filas
-   idénticas en todo lo que ve el modelo sobrevivirían solo por diferir en una columna de
-   fuga.
-2. **Después los duplicados**, y siempre **antes de particionar**. Si se particiona primero,
-   la propia partición ya ha repartido las gemelas entre los dos lados.
-3. **Por último los imposibles:** 1 reserva con `adr` negativo (−6,38) y 165 sin ningún
-   huésped (0 adultos, 0 niños y 0 bebés). No son valores raros discutibles: un precio
-   negativo no es un precio, y una reserva sin personas no es la reserva de nadie. Su
-   etiqueta no describe a ningún cliente —16 de esas 165 constan como canceladas—, así que
-   solo aportarían ruido.
-
-Lo que **no** se borra, a propósito, porque es raro pero posible:
-
-- **218 reservas con 0 adultos pero con niños o bebés.** «Sin huéspedes» es la suma de las
-  tres columnas, no `adults == 0`.
-- **1.619 reservas con `adr = 0`.** Entre ellas están las 621 del segmento `Complementary`
-  (invitaciones del hotel) y las 587 de 0 noches; un precio 0 no es imposible.
-- **Una reserva con `adr = 5.400`**, cuando el siguiente valor más alto es 510. Es un valor
-  extremo, no imposible. Con esta partición cae en el test, así que no afecta al escalado,
-  que se aprende solo con el train.
-
-**Consecuencia asumida.** La prevalencia de cancelación baja de 37,04 % a **27,64 %**, y con
-ella sube el acierto del modelo trivial de 62,96 % a **72,36 %** —que es justo el argumento
-del apartado 5 contra usar accuracy como criterio. Los números de los apartados 5, 7 y 8
-salen todos de esta misma decisión: de las 85.811 filas limpias, **68.648 van a train y
-17.163 al test**, con un 27,64 % de cancelaciones en cada mitad (`stratify=y`).
+Quitar los duplicados tuvo un efecto que asumo: muchas de las copias eran reservas de
+grupos, y casi desaparecen las reservas con tarifa no reembolsable (`Non Refund`).
 
 ---
 
 ## 3. Análisis exploratorio (EDA)
 
-El EDA completo está en [`notebooks/finales/eda_final.ipynb`](notebooks/finales/eda_final.ipynb),
-ejecutado y con las salidas guardadas. Solo entra lo que cambió alguna decisión del
-proyecto; la tabla sale de ese notebook, con sus cifras.
+El análisis completo está en [`notebooks/finales/eda_final.ipynb`](notebooks/finales/eda_final.ipynb).
+Esta tabla resume lo que encontré y qué decisión tomé en cada caso:
 
-| Hallazgo | Evidencia | Decisión que tomamos |
+| Hallazgo | Evidencia | Decisión |
 |:---|:---|:---|
 | Clases desbalanceadas | Tras limpiar, 72,36 % no cancela (62,96 % en crudo) | F1 de la clase «cancela» como métrica principal; accuracy, secundaria |
 | `reservation_status` es la respuesta | Check-Out → 0; Canceled y No-Show → 1, sin excepciones | Se elimina, junto con su fecha |
 | Parking y habitación asignada se rellenan al llegar | 7.416 reservas con plaza: ninguna cancelada ni No-Show | Se eliminan: quedan 27 predictoras |
-| Duplicados exactos | 33.413 filas (28,0 %); sin quitarlos, el 32,7 % del test tendría una gemela en train | Se eliminan antes de partir: 85.811 filas |
+| Duplicados exactos (sin contar las fugas) | 33.413 filas (28,0 %); sin quitarlos, el 32,7 % del test tendría una gemela en train | Se eliminan antes de partir: 85.811 filas |
 | Registros imposibles | 1 reserva con adr negativo y 165 sin ningún huésped | Se eliminan |
 | Alta cardinalidad | country, agent y company: 168, 325, 320 valores; one-hot ingenuo de 880 columnas | Top-10 + cajón dentro del Pipeline: 97 columnas |
 | Nulos con significado | agent 13,7 % y company 94,1 % nulos en train | El nulo es su propia categoría: sin agente = reserva directa |
 | lead_time separa | Mediana de 79 días si cancela frente a 37 si no | Se mantiene; mediana para imputar y escalado, dentro del Pipeline |
 
-Hay además dos variables que se quedan con una duda declarada: `booking_changes`
-(apartado 2) y `country` (apartado 10).
-
 ---
 
 ## 4. Diseño del sistema
 
+He separado el código en módulos, cada uno con una tarea, y `main.py` los llama en orden:
+
 ```
 MasterPonita-ML-EntregaFinal-Grupo6/
-├── main.py                          orquestador: python main.py
-├── requirements.txt                 dependencias con versión fijada
+├── main.py                          ejecuta todo el proceso: python main.py
+├── requirements.txt                 librerías con la versión fijada
 ├── .python-version                  3.12
 ├── .gitignore
 │
 ├── src/
-│   ├── __init__.py
-│   ├── config.py                    parámetros, rutas, semilla y umbral
-│   ├── data_loader.py               cargar, limpiar, partir, preprocesador
-│   ├── model_trainer.py             registro de modelos y bucle comparador
-│   ├── evaluator.py                 métricas y figuras; único que abre el test
-│   └── predictor.py                 inferencia con el modelo entrenado
+│   ├── config.py                    parámetros: rutas, semilla, métrica, umbral...
+│   ├── data_loader.py               carga, limpieza, partición y preprocesado
+│   ├── model_trainer.py             los modelos y su comparación
+│   ├── evaluator.py                 métricas y figuras sobre el test
+│   └── predictor.py                 predicciones con el modelo guardado
 │
 ├── notebooks/
-│   ├── exploracion/                 la cocina: se prueba y se falla
+│   ├── exploracion/                 pruebas y borradores
 │   │   ├── eda_inicial.ipynb
 │   │   └── pruebas_modelos.ipynb
-│   └── finales/                     el escaparate: lo que se defiende
+│   └── finales/                     los notebooks que presento
 │       ├── eda_final.ipynb
 │       └── comparativa_modelos.ipynb
 │
-├── tests/                           pytest: un fichero por módulo, más el contrato
-│   ├── conftest.py
-│   ├── test_contrato.py             las firmas que main.py da por hechas
-│   ├── test_data_loader.py
-│   ├── test_model_trainer.py
-│   ├── test_evaluator.py
-│   └── test_predictor.py
-│
-├── data/
-│   ├── raw/dataset_practica_final.csv   el CSV original, intacto y versionado
-│   └── processed/                   intermedios (no se versiona)
-│
-├── models/                          artefactos entrenados (no se versiona)
-│   ├── mejor_modelo.pkl             el Pipeline COMPLETO: preprocesado + modelo
-│   ├── mejor_modelo.keras           solo si gana la red
-│   └── metadatos.json               ganador, umbral, columnas, hiperparámetros, versiones
-│
-├── outputs/                         generado por evaluator.py, SÍ se versiona
-│   ├── confusion_matrix.png
-│   ├── roc_curve.png                los seis modelos en los mismos ejes
-│   ├── feature_importance.png
-│   ├── tabla_comparativa.csv
-│   └── metricas_test.json
-│
-└── docs/
-    ├── diccionario_datos.md         las 32 variables del CSV
-    ├── guion_practica.pdf           el enunciado
-    ├── exportar_informe.py          README → informe_final.pdf
-    └── informe_final.pdf            este README exportado: lo que se sube a PontIA
+├── tests/                           tests con pytest
+├── data/raw/                        el CSV original
+├── models/                          el modelo entrenado (no se sube a GitHub)
+├── outputs/                         figuras y tablas de resultados
+└── docs/                            diccionario de datos, enunciado e informe en PDF
 ```
 
-**El flujo** que ejecuta `main.py`, en seis pasos:
+**Pasos de `main.py`:**
 
-1. `data_loader.preparar()`: lee el CSV, quita fugas, duplicados e imposibles, parte en
-   train/test (80/20, estratificado) y construye el preprocesador **sin ajustar**.
-2. `model_trainer.entrenar_y_comparar()`: para cada modelo del registro, un `Pipeline`
-   (preprocesador + modelo), búsqueda de hiperparámetros con validación cruzada de 5
-   folds sobre el train y reentrenamiento con todo el train.
-3. `model_trainer.elegir_mejor()`: el ganador por la métrica principal.
-4. `evaluator`: métricas del ganador sobre el test (una sola vez), las tres figuras y el
-   informe en `outputs/`.
-5. `model_trainer.guardar()`: el Pipeline completo y sus metadatos en `models/`.
-6. `predictor`: recarga el artefacto desde disco y predice reservas del test.
+1. Carga el CSV, lo limpia, lo separa en train y test y prepara el preprocesado
+   (`data_loader.preparar()`).
+2. Compara los seis modelos con validación cruzada de 5 particiones (folds) sobre el
+   train, buscando antes los mejores hiperparámetros de los cuatro que los tienen. Luego
+   vuelve a entrenar cada uno con todo el train y hace una tabla comparativa
+   (`model_trainer.entrenar_y_comparar()`).
+3. Elige el mejor modelo según el F1 (`model_trainer.elegir_mejor()`).
+4. Evalúa ese modelo una sola vez sobre el test y genera las figuras (`evaluator`).
+5. Guarda el modelo en `models/` (`model_trainer.guardar()`).
+6. Lo vuelve a cargar desde disco y predice unas cuantas reservas, para comprobar que
+   el modelo guardado funciona (`predictor`).
 
-**El preprocesador** (`ColumnTransformer`) tiene tres ramas: las 16 numéricas se imputan
-con la mediana y se escalan; las 8 categóricas se imputan con una constante y pasan por
-one-hot; y `country`, `agent` y `company` se agrupan en sus 10 valores más frecuentes más
-un cajón para el resto. Las 27 columnas de entrada salen como 97 (16 + 48 + 3 × 11), en
-vez de las 880 de un one-hot directo.
+**Decisiones que tomé:**
 
-**Decisiones de diseño:**
-
-- **Un módulo, una responsabilidad.** `data_loader` prepara, `model_trainer` compara,
-  `evaluator` mide, `predictor` predice y `main.py` solo los llama en orden.
-- **La partición se hace una sola vez**, en `data_loader`. Si cada módulo partiera por
-  su cuenta, cada modelo se compararía contra un reparto distinto.
-- **Todo lo que aprende un número de los datos va dentro del `Pipeline`** (medianas,
-  categorías, medias del escalado), para que se ajuste solo con el train de cada fold.
-  Lo que **borra filas** (duplicados, imposibles) va fuera y antes de partir.
-- **Registro de modelos con interfaz común** (`ModeloBase`), imitando por dentro a una
-  librería de AutoML: cada modelo es una clase con `construir()` y
-  `espacio_busqueda()`, y un único bucle los recorre todos. Añadir un modelo más es una
-  clase y una línea en el registro.
-- **La red de Keras se construye en `fit()`**, no en `__init__`: si no, `clone()`
-  reparte la misma red a los cinco folds y cada fold arranca con lo aprendido en el
-  anterior. Hay un test que lo vigila.
-- **Todo lo configurable vive en `src/config.py`**: rutas, semilla, métrica, umbral,
-  folds y modo demo. La semilla (42) es la misma para partición, modelos y validación
-  cruzada, así que dos ejecuciones dan la misma tabla.
-- **El artefacto guarda el Pipeline entero**, no solo el modelo, y sus metadatos llevan
-  el umbral con el que se entrenó: la inferencia no depende de lo que diga `config`
-  después.
+- **Uso un `Pipeline` de scikit-learn con el preprocesado dentro.** Así, en cada fold
+  de la validación cruzada el preprocesado (medianas, escalado, categorías) se aprende
+  solo con los datos de entrenamiento de ese fold, y no se cuela información de la
+  parte de validación.
+- **El preprocesado** trata distinto cada tipo de columna: a las numéricas les relleno
+  los huecos con la mediana y las escalo; a las categóricas les aplico one-hot. Tres
+  columnas (`country`, `agent` y `company`) tienen cientos de valores distintos, así que
+  me quedo con sus 10 valores más frecuentes y agrupo el resto en «otros». Con eso paso
+  de 880 columnas a 97.
+- **Todos los modelos siguen la misma estructura** (una clase base, `ModeloBase`, con
+  `construir()` y `espacio_busqueda()`), y un mismo bucle los entrena y los compara a
+  todos, así que se comparan en igualdad de condiciones. La idea la saqué de las
+  librerías de AutoML que menciona el enunciado (PyCaret, H2O...): añadir otro modelo es
+  escribir una clase y añadirla al registro.
+- **La red neuronal se crea de nuevo en cada entrenamiento.** Si se creara una sola
+  vez, la validación cruzada reutilizaría la misma red entre folds sin reiniciar los
+  pesos, y el resultado saldría inflado. Tengo un test que comprueba que dos
+  entrenamientos seguidos dan exactamente lo mismo.
+- **Los parámetros generales están en `src/config.py`** (rutas, semilla, métrica,
+  umbral, número de folds y modo demo), y uso siempre la misma semilla (42), así que al
+  repetir la ejecución salen los mismos resultados. Las combinaciones de hiperparámetros
+  que prueba la búsqueda están en cada modelo, en `src/model_trainer.py` (apartado 11).
+- **Guardo el Pipeline completo**, no solo el modelo, junto con el umbral y las columnas
+  con los que se entrenó. Así, para predecir basta con pasarle una reserva con las
+  columnas originales.
 
 ---
 
 ## 5. Métrica principal y por qué
 
-**Métrica principal:** F1 de la clase «cancela» (`pos_label=1`) · **Secundarias:**
-accuracy, precision, recall y ROC-AUC. Se fijó antes de entrenar, en `config.py`.
+**Métrica principal:** F1 de la clase «cancela». **Secundarias:** accuracy, precision,
+recall y ROC-AUC. La elegí antes de entrenar y está fijada en `src/config.py`, para no
+escogerla después según qué modelo saliera mejor.
 
-**Por qué no accuracy.** Tras la limpieza, un modelo que dijera siempre «no cancela»
-acierta el **72,36 %** sin haber aprendido nada. Es exactamente lo que saca el baseline
-en la tabla del apartado 7 (accuracy 0,724, F1 0,000). Con accuracy, cualquier modelo
-mediocre parece bueno; con F1, el baseline se queda en cero.
+**Por qué no accuracy.** Un modelo que dijera siempre «no cancela» acertaría el 72,36 %
+sin haber aprendido nada, porque la mayoría de reservas no se cancela. Es lo que saca el
+modelo base en la tabla del apartado 7: accuracy 0,724 pero F1 0. Con accuracy, casi
+cualquier modelo parece bueno.
 
-**Por qué F1 y no solo recall o solo precision.** Los dos errores le cuestan dinero al
-hotel (apartado 2):
+**Por qué F1.** Como expliqué en el apartado 2, los dos errores le cuestan dinero al
+hotel: no detectar una cancelación deja una habitación vacía, y dar por cancelada una
+reserva que no lo es obliga a realojar al cliente. Si solo mirara el recall, el modelo
+tendería a marcar demasiadas reservas como canceladas; si solo mirara la precision,
+solo marcaría las más obvias. El F1 combina las dos, y como no sé cuánto cuesta cada
+error, me pareció lo más razonable.
 
-- Un **falso negativo** es una cancelación que nadie vio venir: la habitación se queda
-  vacía esa noche y no se recupera. Si solo importara esto, se optimizaría el recall, y
-  el modelo acabaría marcando como «cancela» casi todo.
-- Un **falso positivo** es un cliente que sí llega a una habitación que se revendió:
-  hay que realojarlo y compensarlo. Si solo importara esto, se optimizaría la precision,
-  y el modelo solo marcaría las cancelaciones más obvias.
-
-El dataset no trae el coste en euros de cada error, así que no hay forma honesta de
-decir cuál pesa más. F1 exige que el modelo sea bueno en los dos a la vez, que es lo
-razonable sin esa información.
-
-**Por qué ROC-AUC queda como secundaria.** Mide lo bien que el modelo ordena las
-reservas por riesgo, sin fijar umbral. Es útil para comparar, pero el hotel tiene que
-tomar una decisión sí/no por reserva, y eso es lo que mide F1 con el umbral de 0,50.
+**ROC-AUC** lo uso como apoyo: mide lo bien que el modelo ordena las reservas de más a
+menos riesgo, pero el hotel necesita una respuesta sí/no para cada reserva, y eso es lo
+que mide el F1 (con un umbral de 0,5).
 
 ---
 
@@ -333,7 +259,8 @@ tomar una decisión sí/no por reserva, y eso es lo que mide F1 con el umbral de
 git clone https://github.com/tmllabres/MasterPonita-ML-EntregaFinal-Grupo6.git
 cd MasterPonita-ML-EntregaFinal-Grupo6
 
-python -m venv .venv
+python -m venv .venv            # con Python 3.12 (compruébalo con python --version)
+# Windows con varias versiones instaladas: py -3.12 -m venv .venv
 .venv\Scripts\activate          # Windows
 # source .venv/bin/activate     # macOS / Linux
 
@@ -345,75 +272,67 @@ python -m pip install -r requirements.txt
 > «El nombre del archivo o la extensión es demasiado largo».
 
 <details>
-<summary>Alternativa rápida con <code>uv</code> (opcional)</summary>
+<summary>Alternativa con <code>uv</code> (opcional)</summary>
 
-Si tienes [uv](https://docs.astral.sh/uv/) instalado, lee el mismo `requirements.txt`
-y tarda bastante menos —importa, porque TensorFlow son varios cientos de MB:
+Con [uv](https://docs.astral.sh/uv/) la instalación es bastante más rápida:
 
 ```bash
 uv venv --python 3.12
 uv pip install -r requirements.txt
 ```
-
-No es necesario: los pasos de arriba con `pip` funcionan igual.
 </details>
 
-**Tests** (unos 120, en torno a un minuto):
+**Tests** (unos 120, tardan en torno a un minuto):
 
 ```bash
 python -m pytest -q
 ```
 
-**Pipeline completo** (carga → limpieza → entrenamiento → comparación → evaluación →
-artefacto → inferencia). Tarda unos 10 minutos, casi todo la búsqueda de
-hiperparámetros del Random Forest:
+**Proceso completo** (tarda unos 10 minutos, sobre todo por la búsqueda de
+hiperparámetros del Random Forest):
 
 ```bash
 python main.py
 ```
 
-**Versión corta para la defensa** (muestra de 20.000 reservas, 3 folds y 15 épocas en
-la red; en torno a un minuto y medio):
+**Versión corta para la defensa** (usa 20.000 reservas, 3 folds y menos épocas en la
+red; tarda en torno a un minuto y medio):
 
 ```bash
 python main.py --demo
 ```
 
-> La demo escribe en las mismas rutas que la ejecución completa, así que sobrescribe
-> `outputs/` con los resultados de la muestra. Para volver a las figuras y tablas
-> oficiales: `git restore outputs/`.
+> La demo guarda sus resultados en las mismas carpetas que el proceso completo, así que
+> sobrescribe `outputs/` y el modelo de `models/`. Las figuras y tablas oficiales se
+> recuperan con `git restore outputs/`; el modelo oficial, volviendo a ejecutar `python main.py`.
 
-**Inferencia con el modelo ya entrenado, sin reentrenar nada:**
+**Predecir con el modelo ya entrenado:**
 
 ```bash
 python -m src.predictor
 ```
 
-> `models/` está en el `.gitignore`, así que en un clon recién hecho **todavía no existe
-> ningún artefacto**: hay que lanzar `python main.py` (o `--demo`) al menos una vez antes
-> de que la inferencia funcione.
+> La carpeta `models/` no se sube a GitHub, así que en un clon nuevo hay que ejecutar
+> `python main.py` (o `--demo`) al menos una vez antes de predecir.
 
-Salidas: figuras y tablas en `outputs/`, modelo en `models/`.
+**Notebooks:** `jupyter lab` desde la carpeta del proyecto. `comparativa_modelos.ipynb`
+lee los resultados que ya están en `outputs/`, así que no hace falta ejecutar antes `main.py`.
 
-**Notebooks:** `jupyter lab` desde la raíz. `comparativa_modelos.ipynb` lee lo que dejó
-`main.py` en `outputs/`, así que hay que ejecutar antes el pipeline.
-
-**Informe en PDF:** `python docs/exportar_informe.py` regenera `docs/informe_final.pdf`
-a partir de este README (necesita Chrome o Edge instalado).
+**Informe en PDF:** `python docs/exportar_informe.py` vuelve a generar
+`docs/informe_final.pdf` a partir de este README (necesita Chrome o Edge).
 
 ---
 
 ## 7. Modelos comparados
 
-Los cinco que exige el enunciado más un baseline (`DummyClassifier`, que dice siempre
-«no cancela»), todos con el mismo protocolo: el mismo `StratifiedKFold` de 5 folds con
-la misma semilla, el preprocesado dentro del `Pipeline` y el `scoring` fijado a la
-métrica principal. Cada modelo se compara con su mejor combinación de hiperparámetros
-(`GridSearchCV`, apartado 11); la red se valida con sus valores por coste.
+He comparado los cinco modelos que pide el enunciado y un modelo base
+(`DummyClassifier`, que siempre dice «no cancela»). Todos se evalúan igual: validación
+cruzada de 5 folds con la misma semilla sobre las 68.648 reservas de entrenamiento.
+Para cada modelo, menos la red (que es muy lenta) y el modelo base (que no tiene nada
+que ajustar), busqué los mejores hiperparámetros con `GridSearchCV` (apartado 11).
 
-Media ± desviación de los 5 folds, sobre las 68.648 reservas de train. La tabla sale de
-`outputs/tabla_comparativa.csv` (ver `comparativa_modelos.ipynb`); el tiempo incluye la
-búsqueda y el reentrenamiento final.
+La tabla sale de `outputs/tabla_comparativa.csv` y muestra la media ± la desviación de
+los 5 folds. El tiempo incluye la búsqueda de hiperparámetros.
 
 | Modelo | F1 (CV) | Accuracy | Precision | Recall | ROC-AUC | Tiempo (s) |
 |:---|:---|:---|:---|:---|:---|---:|
@@ -424,35 +343,35 @@ búsqueda y el reentrenamiento final.
 | Regresión logística | 0,542 ± 0,006 | 0,786 ± 0,003 | 0,663 ± 0,008 | 0,458 ± 0,007 | 0,831 ± 0,004 | 11 |
 | Baseline (Dummy) | 0,000 ± 0,000 | 0,724 ± 0,000 | 0,000 ± 0,000 | 0,000 ± 0,000 | 0,500 ± 0,000 | 2 |
 
-La fila del baseline es la que da sentido a las demás: en accuracy todos los modelos le
-sacan poco (del 72,4 % al 84,2 %), mientras que en F1 se ve quién aprende de verdad.
+Con el modelo base se ve bien el problema de la accuracy: todos los modelos quedan
+entre el 72 % y el 84 %, mientras que en F1 las diferencias son mucho más claras.
 
 ---
 
 ## 8. Resultados y elección final
 
-**Modelo elegido: XGBoost**, con la combinación que eligió la búsqueda: 800 árboles,
-`learning_rate` 0,05, profundidad máxima 8 y un 80 % de filas y de columnas por árbol.
+**Modelo elegido: XGBoost**. La búsqueda eligió 800 árboles, `learning_rate` de 0,05 y
+profundidad máxima de 8. Además, cada árbol usa un 80 % de las filas y de las columnas;
+ese valor lo fijé yo y no entró en la búsqueda.
 
 **Por qué gana:**
 
-- **Es el mejor en la métrica principal y el test lo confirma.** F1 de 0,697 ± 0,007
-  en validación cruzada y 0,699 en test. Que el test no salga peor que la validación
-  cruzada indica que no se eligió por suerte en los folds.
-- **Frente al Random Forest**, que se queda muy cerca: gana en F1, recall, accuracy y
-  AUC (el bosque solo es algo más preciso, 0,742 frente a 0,740) y su búsqueda tardó una
-  cuarta parte. Los dos son conjuntos de árboles, pero el boosting construye cada árbol
-  para corregir los errores de los anteriores, y eso afina las reservas dudosas.
-- **Frente a la regresión logística** (0,542): la señal está en combinaciones, como un
-  `lead_time` largo que pesa distinto según el agente o el segmento, y un modelo lineal
-  sobre el one-hot no puede combinarlas. **Frente al árbol solo** (0,651): cientos de
-  árboles que se corrigen se equivocan menos que uno.
-- **Frente a la red** (0,669): con datos tabulares y categorías de muchos valores, los
-  árboles rinden más con menos ajuste. La red, además, es la que más varía entre folds
-  (± 0,012) y la más lenta de entrenar.
+- Tiene el mejor F1 en la validación cruzada (0,697) y en el test da un resultado
+  parecido (0,699), así que no parece que haya tenido suerte con los folds.
+- El Random Forest queda muy cerca (0,693). XGBoost le gana en F1, recall y AUC, y además
+  tardó bastante menos. Los dos combinan muchos árboles, pero en XGBoost cada árbol
+  intenta corregir los errores de los anteriores.
+- La regresión logística queda muy por debajo (0,542). Creo que es porque no puede
+  combinar variables: por ejemplo, que una reserva hecha con mucha antelación pese
+  distinto según el agente o el tipo de cliente. Un solo árbol de decisión (0,651)
+  tampoco llega al nivel de los modelos que combinan muchos árboles.
+- La red neuronal (0,669) queda en medio: con datos en forma de tabla y con muchas
+  categorías, los modelos de árboles suelen funcionar mejor. Además es la que más varía
+  entre folds, y cada entrenamiento suyo es el más lento de todos. En la tabla tarda lo
+  mismo que XGBoost, pero porque la red entrena una sola combinación y XGBoost prueba 27.
 
-**Métricas del ganador sobre el test** (17.163 reservas que el modelo no vio al
-entrenar, medidas una sola vez; copiadas de `outputs/metricas_test.json`):
+**Resultados del ganador en el test** (17.163 reservas que no se usaron para entrenar;
+los valores están en `outputs/metricas_test.json`):
 
 | Métrica | Valor |
 |:---|---:|
@@ -462,25 +381,25 @@ entrenar, medidas una sola vez; copiadas de `outputs/metricas_test.json`):
 | Recall | 0,658 |
 | ROC-AUC | 0,907 |
 
-**Matriz de confusión.** De las 4.743 cancelaciones del test, el modelo detecta 3.123
-(65,8 %) y se le escapan 1.620. De las 12.420 reservas que no se cancelan, marca por
-error 1.064 (8,6 %).
+**Matriz de confusión.** De las 4.743 reservas del test que se cancelaron, el modelo
+detecta 3.123 (el 65,8 %) y se le escapan 1.620. De las 12.420 que no se cancelaron,
+marca por error 1.064 (el 8,6 %).
 
 ![Matriz de confusión del ganador en test](outputs/confusion_matrix.png)
 
-**Curva ROC.** Los seis modelos en los mismos ejes. XGBoost, el Random Forest y la red
-van casi juntos (AUC entre 0,897 y 0,907); la logística queda claramente por debajo y el
-baseline es la diagonal del azar.
+**Curva ROC.** Pongo los seis modelos en el mismo gráfico. XGBoost, el Random Forest y
+la red quedan muy juntos (AUC entre 0,897 y 0,907), el árbol (0,869) y la regresión
+logística (0,834) quedan por debajo y el modelo base es la diagonal.
 
 ![Curva ROC de los seis modelos en test](outputs/roc_curve.png)
 
-**Importancia de variables.** Se mide por permutación sobre el test: cuánto cae el F1 al
-barajar cada variable. Se usa el mismo método para cualquier ganador y mide sobre las
-variables originales, no sobre las 97 columnas del one-hot. Pesan sobre todo `agent`,
-`country`, `lead_time`, `total_of_special_requests` y `market_segment`. Es la importancia
-para este modelo: `hotel` o `distribution_channel` salen casi a cero no porque no tengan
-relación con la cancelación, sino porque `agent` y `market_segment` ya llevan esa
-información.
+**Importancia de las variables.** Para medirla uso la importancia por permutación sobre
+el test: se desordena una variable y se mira cuánto empeora el F1. Así funciona igual
+con cualquier modelo y sale por variable original (las 27), no por cada una de las 97
+columnas del one-hot. Las que más pesan son `agent`, `country`, `lead_time`,
+`total_of_special_requests` y `market_segment`. Algunas variables, como `hotel`, salen
+casi a cero, probablemente porque su información ya está en otras (por ejemplo, en el
+agente).
 
 ![Importancia de variables del ganador](outputs/feature_importance.png)
 
@@ -488,62 +407,59 @@ información.
 
 ## 9. Conclusiones
 
-- **El modelo sirve para decidir.** De cada cuatro reservas que marca como cancelación,
+- El modelo es útil para el hotel: de cada cuatro reservas que marca como canceladas,
   tres se cancelan de verdad (precision 0,746), y detecta dos de cada tres
-  cancelaciones (recall 0,658). Con eso, *revenue management* puede aplicar overbooking
-  controlado o pedir depósito solo sobre las reservas marcadas, en vez de aplicar la
-  tasa media a todo el mundo, que es lo que hace el baseline (F1 0).
-- **La probabilidad vale más que el 0/1.** Con un AUC de 0,907, ordenar las reservas por
-  su probabilidad de cancelar permite repartir el esfuerzo: primero las de más riesgo.
-- **Los datos movieron más la nota que el modelo.** Entre los tres mejores modelos hay
-  menos de tres centésimas de F1 (0,669 a 0,697). En cambio, dejar las dos fugas
-  posteriores habría regalado unas tres centésimas más sin que el modelo supiera nada
-  nuevo, y sin quitar los duplicados un tercio del test (32,7 %) tendría una copia
-  exacta en train. La mayor parte del trabajo que decide si la cifra final es honesta
-  está en la limpieza, no en elegir el algoritmo.
-- **Qué predice la cancelación**: quién gestiona la reserva (`agent`, `market_segment`),
-  el país, la antelación (`lead_time`) y si el cliente ha hecho peticiones especiales.
-  Quien pide algo concreto tiende a venir.
+  cancelaciones (recall 0,658). Con esto se podría pedir un depósito o hacer overbooking
+  solo con las reservas de más riesgo, en lugar de tratar a todas igual.
+- Además de la predicción sí/no, el modelo da una probabilidad de cancelación para cada
+  reserva, y con ella ordena bien las reservas de más a menos riesgo (AUC 0,907). Así el
+  hotel puede empezar por las más arriesgadas.
+- Lo que más me enseñó la práctica es la importancia de preparar bien los datos. Entre
+  los tres mejores modelos la diferencia de F1 es pequeña (de 0,669 a 0,697), menos de
+  lo que subía el F1 del modelo de prueba al dejar las dos fugas de la llegada (de 0,678
+  a 0,710). Y sin quitar los duplicados, un tercio del test (32,7 %) tendría una copia
+  exacta en train. Los resultados habrían salido mejores, pero no serían reales.
+- Las variables que más ayudan a predecir son el agente de la reserva, el país, la
+  antelación con la que se reserva y las peticiones especiales.
 
 ---
 
 ## 10. Reflexión crítica: limitaciones y mejoras
 
-- **La validación cruzada no es anidada.** La búsqueda elige la mejor combinación
-  mirando los mismos folds con los que después se mide, así que el F1 de la tabla del
-  apartado 7 sale algo optimista. El test, medido una sola vez, da una cifra honesta
-  (0,699 frente a 0,697 en CV: aquí el sesgo es pequeño). Mejora: validación cruzada
-  anidada.
-- **La partición es aleatoria, no temporal.** La tasa de cancelación sube cada año
-  (20,6 % en 2015, 26,5 % en 2016 y 32,0 % en 2017) y `arrival_date_year` es la sexta
-  variable más importante. En producción se predice el futuro: entrenar con 2015-2016 y
-  medir en 2017 daría una cifra más realista, y probablemente peor.
-- **El umbral de 0,50 no sale del negocio.** Sin el coste en euros de cada error no se
-  puede elegir el umbral que minimice el coste. Con esos costes, bastaría con barrer el
-  umbral sobre las probabilidades que ya da el modelo.
-- **`country` puede ser en parte una fuga.** En los No-Show, el 59,4 % de las reservas
-  son de Portugal, frente al 27,6 % de las que llegaron y el 39,6 % de las canceladas: el
-  mismo patrón que delató al parking, aunque mucho menos tajante. Si el país se corrige
-  en el check-in, parte de su peso sería información que no existe al reservar. Es la
-  segunda variable más importante y quitarla baja el F1 de 0,678 a 0,590
-  (`pruebas_modelos.ipynb`), así que se queda, con la duda declarada. Lo mismo, en menor
-  grado, con `booking_changes` (apartado 2).
-- **Quitar los duplicados es una hipótesis.** El CSV no trae identificador de reserva,
-  así que algunas de esas filas serían habitaciones distintas de un mismo grupo. Se
-  asume para no inflar el test, pero cambia la población: desaparece el 93 % de las
-  reservas `Non Refund`.
-- **La red no se ha ajustado.** Su arquitectura se fijó de antemano y no entra en la
-  búsqueda por coste. Con más tiempo de cómputo podría acercarse más a los árboles.
-- **Correlación, no causa.** La importancia de variables dice en qué se apoya el modelo,
-  no qué provoca una cancelación: cambiar de agente no hará que un cliente venga.
+- **La validación cruzada no es anidada.** Los hiperparámetros se eligen con los mismos
+  folds con los que luego se mide, así que el F1 de la tabla puede salir algo
+  optimista. Por eso la cifra final es la del test, que solo se usa una vez. Se podría
+  mejorar con una validación cruzada anidada.
+- **La partición es aleatoria y no por fechas.** En los datos ya limpios, las
+  cancelaciones aumentan cada año (20,6 % en 2015, 26,5 % en 2016 y 32,0 % en 2017), y
+  en la realidad el modelo tendría que predecir reservas futuras. Además,
+  `arrival_date_year` es la sexta variable más importante del modelo. Una prueba más
+  realista sería entrenar con 2015-2016 y evaluar con 2017, y probablemente saldría algo
+  peor.
+- **El umbral de 0,5 no tiene en cuenta el coste real** de cada error, porque el dataset
+  no lo incluye. Con esos costes se podría elegir un umbral mejor.
+- **`country` podría ser en parte una fuga.** Entre los No-Show hay muchas más reservas
+  de Portugal (59,4 %) que entre las que sí llegaron (27,6 %), y eso me hace sospechar
+  que el país se corrige al hacer el check-in. No la quité porque la prueba no es tan
+  clara como la del parking: allí ninguna reserva con plaza estaba cancelada, y aquí
+  solo cambia la proporción. Pero lo dejo anotado como duda, porque pesa mucho: con el
+  modelo de prueba, sin ella el F1 baja de 0,678 a 0,590, así que si fuera fuga el
+  resultado real sería bastante peor. Con `booking_changes` pasa algo parecido, en menor
+  medida.
+- **Quitar los duplicados es una suposición.** Sin un identificador de reserva no sé si
+  algunas de esas filas eran reservas distintas de un mismo grupo.
+- **No ajusté los hiperparámetros de la red neuronal**, porque cada entrenamiento es
+  bastante lento. Con más tiempo se podría intentar.
+- **El modelo encuentra relaciones, no causas:** que un agente tenga más cancelaciones
+  no quiere decir que el agente sea la causa.
 
 ---
 
 ## 11. Bonus técnicos implementados
 
-| Bonus | Dónde está | Qué demuestra |
+| Bonus | Dónde está | Resultado |
 |---|---|---|
-| Optimización de hiperparámetros con `GridSearchCV` | `config.BUSQUEDA = "grid"` y `espacio_busqueda()` de cada modelo en `src/model_trainer.py` | Con los mismos folds y la misma métrica que la comparación, el F1 en CV mejora en el árbol (0,637 → 0,651), el bosque (0,654 → 0,693) y XGBoost (0,686 → 0,697); la logística se queda igual (0,542). Las rejillas incluyen los valores por defecto, así que la búsqueda nunca deja a un modelo peor que sin ella. La red se queda fuera por coste. |
+| Optimización de hiperparámetros con `GridSearchCV` | `config.BUSQUEDA = "grid"` y `espacio_busqueda()` de cada modelo en `src/model_trainer.py` | Con la búsqueda, el F1 en validación cruzada mejora en el árbol (0,637 → 0,651), el Random Forest (0,654 → 0,693) y XGBoost (0,686 → 0,697). La regresión logística queda igual (0,542). Las rejillas incluyen los valores por defecto de cada modelo, así que la búsqueda nunca lo deja peor que sin ella. La red no entra en la búsqueda porque es muy lenta. |
 
 ---
 
@@ -551,9 +467,9 @@ información.
 
 - [Diccionario de variables](docs/diccionario_datos.md): las 32 columnas del CSV.
 - [Guion de la práctica](docs/guion_practica.pdf): el enunciado.
-- Notebooks que se defienden:
-  - [`notebooks/finales/eda_final.ipynb`](notebooks/finales/eda_final.ipynb): el EDA, con las decisiones que tomó.
-  - [`notebooks/finales/comparativa_modelos.ipynb`](notebooks/finales/comparativa_modelos.ipynb): la tabla, las figuras y la lectura del ganador.
-- Notebooks de trabajo: [`notebooks/exploracion/`](notebooks/exploracion/). En
-  `pruebas_modelos.ipynb` están las pruebas que respaldan cifras de este README (las
-  fugas posteriores, la duda sobre `country` y la comprobación de la red).
+- Notebooks finales:
+    - [`notebooks/finales/eda_final.ipynb`](notebooks/finales/eda_final.ipynb): el análisis exploratorio.
+    - [`notebooks/finales/comparativa_modelos.ipynb`](notebooks/finales/comparativa_modelos.ipynb): la comparación de modelos y las figuras.
+- Notebooks de pruebas: [`notebooks/exploracion/`](notebooks/exploracion/). En
+  `pruebas_modelos.ipynb` están las pruebas de las fugas, de `country`, de
+  `booking_changes` y de la red.

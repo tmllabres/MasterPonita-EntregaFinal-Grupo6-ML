@@ -1,9 +1,9 @@
 """Entrenamiento y comparación de los modelos.
 
-Aquí está la idea que pide el enunciado: imitar por dentro a una librería de AutoML.
-Cada modelo es una CLASE con la misma interfaz, viven todas en un REGISTRO, y un único
-bucle las recorre sin un solo `if`. Añadir un modelo más = escribir su clase y una
-línea en el registro; el bucle no cambia ni una letra.
+Me inspiré en las librerías de AutoML que menciona el enunciado: cada modelo es una
+clase con la misma interfaz, todas están en un registro y un mismo bucle las entrena
+y las compara. Para añadir un modelo basta con escribir su clase y añadirla al
+registro.
 """
 from __future__ import annotations
 
@@ -40,52 +40,53 @@ from . import config
 def _keras():
     """Importa Keras solo cuando hace falta.
 
-    TensorFlow tarda unos 10 s en importarse. Si se importara arriba, cualquier cosa que
-    toque este módulo —los tests de contrato, o predictor con un ganador que no es la
-    red— pagaría esa espera sin llegar a usarlo.
+    TensorFlow tarda en importarse, y así los tests o el predictor con un ganador que
+    no es la red no tienen que esperar.
     """
-    os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")  # sin el ruido de arranque de TF
+    os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")  # oculta los avisos de arranque
     import keras
     return keras
 
 
-# ── El contrato ──────────────────────────────────────────────────────────────
+# ── Interfaz común ───────────────────────────────────────────────────────────
 class ModeloBase(BaseEstimator, ClassifierMixin):
-    """Interfaz común. Todo modelo del registro cumple esto.
+    """Interfaz común que cumplen todos los modelos del registro.
 
-    Reglas de scikit-learn que hay que respetar para que clone(), GridSearchCV y
-    cross_val_score funcionen:
-      · __init__ SOLO guarda hiperparámetros, uno por argumento, sin validar ni
-        construir nada. Lo que se aprende no se toca aquí.
-      · lo aprendido se guarda en atributos con GUION BAJO FINAL: self.model_
-      · fit devuelve self
+    Sigue tres reglas de scikit-learn para que clone(), GridSearchCV y
+    cross_validate funcionen:
+      · __init__ solo guarda los hiperparámetros, uno por argumento, sin validar ni
+        construir nada: clone() hace las copias a partir de esos argumentos.
+      · lo que se aprende en fit va en atributos acabados en guion bajo (model_).
+      · fit devuelve self.
     """
 
     nombre = "base"
 
     @classmethod
     def procesos(cls) -> int:
-        """Procesos con los que se reparten los folds de ESTE modelo en la validación
-        cruzada. Se lee de config al llamarlo, no al importar. La red lo sobrescribe."""
+        """Procesos en paralelo para la validación cruzada de este modelo.
+
+        Se lee de config al llamarlo, no al importar. La red lo sobrescribe.
+        """
         return config.N_JOBS
 
     def construir(self):
-        """Devuelve el estimador o Pipeline sin entrenar. Lo implementa cada hijo."""
+        """Devuelve el estimador sin entrenar. Lo implementa cada subclase."""
         raise NotImplementedError
 
     def espacio_busqueda(self) -> dict:
         """Rejilla de hiperparámetros con la sintaxis paso__hiperparametro.
 
-        Ej.: {"modelo__max_depth": [4, 6, 8]}. Los dobles guiones bajos son el
-        camino hasta el tornillo: cada tramo es la etiqueta que le pusiste al paso.
+        Ej.: {"modelo__max_depth": [4, 6, 8]}, donde «modelo» es el nombre del paso
+        en el Pipeline y max_depth, el hiperparámetro de ese paso.
         """
         return {}
 
     def fit(self, X, y):
-        """Construye un estimador NUEVO, lo entrena y devuelve self.
+        """Construye un estimador nuevo, lo entrena y devuelve self.
 
-        Nuevo en cada fit, nunca reutilizado: así dos fit seguidos no comparten nada,
-        que es lo que clone() da por hecho cuando reparte un modelo virgen a cada fold.
+        Se construye en cada fit para que dos fit seguidos no compartan nada: clone()
+        da por hecho que cada fold recibe un modelo sin entrenar.
         """
         self.model_ = self.construir()
         self.model_.fit(X, y)
@@ -96,31 +97,30 @@ class ModeloBase(BaseEstimator, ClassifierMixin):
         return self.model_.predict(X)
 
     def predict_proba(self, X):
-        """Siempre una matriz (n, 2): columna 0 «no cancela», columna 1 «cancela»."""
+        """Devuelve una matriz (n, 2): columna 0 «no cancela» y columna 1 «cancela»."""
         return self.model_.predict_proba(X)
 
     # ── Lo que no va dentro del .pkl ──
     def guardar_aparte(self, ruta):
-        """Guarda en `ruta` lo que no debe ir dentro del .pkl, y devuelve el modelo tal
-        como tiene que entrar en él. Casi todos caben enteros: se devuelven a sí mismos
-        y no escriben nada. La excepción es la red: ver RedKeras."""
+        """Guarda en `ruta` lo que no va en el .pkl y devuelve lo que sí va.
+
+        Por defecto no escribe nada y devuelve el propio modelo. Solo la red lo cambia
+        (ver RedKeras.guardar_aparte).
+        """
         return self
 
     def cargar_aparte(self, ruta) -> None:
-        """El camino de vuelta de guardar_aparte(). Lo llama predictor.cargar()."""
+        """Carga lo que guardó guardar_aparte(). Lo llama predictor.cargar()."""
 
 
-# ── La linea del suelo ───────────────────────────────────────────────────────
+# ── Modelo base ──────────────────────────────────────────────────────────────
 class Baseline(ModeloBase):
-    """DummyClassifier: la referencia contra la que se miden los cinco de verdad.
+    """DummyClassifier: la referencia con la que comparo los cinco modelos.
 
-    No aprende nada, y ese es justo el punto: con strategy="most_frequent" dice
-    siempre "no cancela" y ya acierta el 72,36 % (el 62,96 % sobre el CSV crudo, antes
-    de quitar los duplicados). Cualquier modelo que no supere claramente esta fila no
-    está aportando nada, y sin la fila no hay forma de saberlo.
-
-    Ojo con la métrica: en accuracy saca 0,72, pero en F1 de la clase positiva saca
-    0,00, porque nunca predice un 1. Las dos cosas dicen lo mismo desde dos sitios.
+    Con strategy="most_frequent" dice siempre «no cancela» y ya acierta el 72,36 %
+    (el 62,96 % sobre el CSV crudo, antes de quitar los duplicados). Un modelo que no
+    lo supere claramente no aporta nada. En accuracy saca 0,72, pero en F1 saca 0,
+    porque nunca predice un 1: por eso uso F1 y no accuracy (apartado 5 del README).
     """
     nombre = "baseline"
 
@@ -128,13 +128,13 @@ class Baseline(ModeloBase):
         return DummyClassifier(strategy="most_frequent")
 
 
-# ── Los cinco obligatorios ───────────────────────────────────────────────────
+# ── Los cinco modelos del enunciado ──────────────────────────────────────────
 class Logistica(ModeloBase):
-    """Regresión logística. Necesita escalado. C es la inversa de la regularización.
+    """Regresión logística. C es la inversa de la fuerza de la regularización.
 
-    El escalado ya lo hace el preprocesador, así que aquí no se repite. max_iter va con
-    margen: si lbfgs se queda sin iteraciones no falla, solo avisa, y el modelo se queda
-    a medio entrenar.
+    Necesita las variables escaladas, pero eso ya lo hace el preprocesador. max_iter va
+    con margen porque si lbfgs no converge no da error, solo un aviso, y el modelo se
+    queda a medio entrenar.
     """
     nombre = "logistica"
 
@@ -150,10 +150,10 @@ class Logistica(ModeloBase):
 
 
 class Arbol(ModeloBase):
-    """Árbol de decisión. No necesita escalado. Vigila max_depth y min_samples_leaf.
+    """Árbol de decisión. No necesita escalado.
 
-    Sin esos dos límites el árbol crece hasta dejar una reserva por hoja: acierta el
-    train entero de memoria y en validación se hunde.
+    Limito max_depth y min_samples_leaf porque sin ellos el árbol crece hasta dejar una
+    reserva por hoja: se aprende el train de memoria y en validación empeora mucho.
     """
     nombre = "arbol"
 
@@ -172,15 +172,13 @@ class Arbol(ModeloBase):
 
 
 class Bosque(ModeloBase):
-    """Random Forest. Bagging: cada árbol ve ~63,2 % de filas distintas y un sorteo
-    de columnas (max_features). Trae feature_importances_ ya calculado.
+    """Random Forest (bagging): cada árbol ve un sorteo de filas y de columnas.
 
-    min_samples_leaf=5 y no 1 (el valor de scikit-learn), elegido de antemano por
-    tamaño: con hojas de una sola reserva, los 300 árboles pesan 665 MB sin comprimir y
-    108 MB con la compresión de guardar(), frente a 142 y 35 MB con 5. Tiene un coste,
-    medido después y declarado: en validación cruzada el F1 baja de 0,681 a 0,654 con el
-    mismo AUC (0,895), porque las probabilidades salen más prudentes y cruzan menos veces
-    el umbral de 0,5. El ganador no cambia.
+    Por defecto uso min_samples_leaf=5 y no 1 (el de scikit-learn) por tamaño: con 1,
+    los 300 árboles ocupan 108 MB con la compresión de guardar(), y con 5, 35 MB. A
+    cambio, sin búsqueda el F1 en validación cruzada baja de 0,681 a 0,654 con el mismo
+    AUC (0,895): las probabilidades salen más moderadas y pasan menos veces el umbral
+    de 0,5. El ganador no cambia.
     """
     nombre = "bosque"
 
@@ -203,12 +201,12 @@ class Bosque(ModeloBase):
 
 
 class Boosting(ModeloBase):
-    """Gradient Boosting. learning_rate y n_estimators son un solo mando: si bajas
-    uno, sube el otro. Sus árboles son de REGRESIÓN: cada hoja guarda una corrección.
+    """Gradient Boosting con XGBoost, una de las tres opciones que acepta el enunciado.
 
-    XGBoost, de los tres que acepta el enunciado. subsample y colsample_bytree sortean
-    filas y columnas en cada árbol, como el bosque, para que no persigan todos el
-    mismo ruido.
+    Cada árbol es de regresión y corrige lo que fallan los anteriores, por eso
+    learning_rate y n_estimators van juntos: con un learning_rate más bajo hacen falta
+    más árboles. subsample y colsample_bytree sortean filas y columnas en cada árbol,
+    como en el bosque, para que no se ajusten todos al mismo ruido.
     """
     nombre = "boosting"
 
@@ -236,25 +234,25 @@ class Boosting(ModeloBase):
 
 
 class RedKeras(ModeloBase):
-    """MLP con Keras envuelto en la interfaz de scikit-learn.
+    """MLP con Keras adaptado a la interfaz de scikit-learn.
 
-    Aquí está la trampa del proyecto: la red se construye en FIT, nunca en __init__.
-    Si se construye en __init__, clone() reparte el mismo objeto de Keras a los 5
-    folds, y como el fit de Keras no reinicia los pesos, el fold 2 arranca habiendo
-    visto ya sus datos de validación. El F1 sale inflado y no salta ningún error.
+    La red se construye en fit y no en __init__: si no, la misma red pasaría de un fold
+    a otro y, como el fit de Keras no reinicia los pesos, un fold empezaría habiendo
+    visto ya sus datos de validación. El F1 saldría inflado sin dar ningún error.
 
-    EarlyStopping aparta el último 10 % del train de cada fit para decidir cuándo parar,
-    y se queda con los pesos de la mejor época, no con los de la última.
+    EarlyStopping usa el último 10 % del train de cada fit para decidir cuándo parar y
+    se queda con los pesos de la mejor época, no con los de la última.
     """
     nombre = "red_keras"
 
     @classmethod
     def procesos(cls) -> int:
-        """Siempre uno, y no por rendimiento sino por corrección: los procesos hijos de la
-        validación cruzada importan config de cero y no ven el config.DEMO = True que
-        main.py pone en tiempo de ejecución. En paralelo, cada fold de --demo entrenaría
-        las épocas completas, y la fila de la tabla describiría una red distinta de la
-        que se guarda, sin ningún error."""
+        """Un solo proceso para la red: así respeta el modo demo.
+
+        Los procesos en paralelo de la validación cruzada vuelven a importar config y no
+        ven el config.DEMO = True que pone main.py al ejecutarse. Con --demo, cada fold
+        entrenaría todas las épocas y la fila de la tabla no sería la red que se guarda.
+        """
         return 1
 
     def __init__(self, capas=(64, 32), dropout=0.2, learning_rate=1e-3, epocas=30,
@@ -272,8 +270,8 @@ class RedKeras(ModeloBase):
         for neuronas in self.capas:
             ocultas += [keras.layers.Dense(neuronas, activation="relu"),
                         keras.layers.Dropout(self.dropout)]
-        # Sin capa Input: el número de columnas lo pone el primer fit, así construir()
-        # no necesita saberlo y mantiene la misma firma que los demás.
+        # Sin capa Input: el número de columnas se fija en el primer fit, así
+        # construir() no necesita saberlo y tiene la misma firma que en los demás.
         red = keras.Sequential([*ocultas, keras.layers.Dense(1, activation="sigmoid")])
         red.compile(optimizer=keras.optimizers.Adam(self.learning_rate),
                     loss="binary_crossentropy")
@@ -281,15 +279,15 @@ class RedKeras(ModeloBase):
 
     def espacio_busqueda(self) -> dict:
         # Vacía a propósito: cada entrenamiento de la red son ~20 s en un solo proceso,
-        # y una rejilla de 9 combinaciones x 5 folds se iría a un cuarto de hora. La
-        # arquitectura se fija a priori y se valida tal cual, como el baseline.
+        # y una rejilla de 9 combinaciones x 5 folds se iría a un cuarto de hora. Fijo
+        # la arquitectura de antemano y se valida tal cual, como el baseline.
         return {}
 
     def fit(self, X, y):
         keras = _keras()
-        # La semilla ANTES de construir: fija los pesos iniciales, el dropout y el
-        # barajado de cada época. Con ella, dos fit sobre los mismos datos dan la misma
-        # red; si el segundo saliera mejor, es que no se está reconstruyendo.
+        # La semilla va antes de construir la red: fija los pesos iniciales, el dropout
+        # y el barajado de cada época, así que dos fit con los mismos datos dan la
+        # misma red.
         keras.utils.set_random_seed(config.SEMILLA)
         self.model_ = self.construir()
 
@@ -307,25 +305,24 @@ class RedKeras(ModeloBase):
         if self.model_ is None:
             raise RuntimeError("La red va en su propio fichero .keras: después de "
                                "joblib.load hay que llamar a cargar_aparte(ruta del .keras).")
-        # La red se llama directamente y no con .predict(): predict() monta su propia
-        # función de TensorFlow para cada red, y con muchas redes nuevas (una por fold y
-        # por combinación de la búsqueda) TensorFlow acaba avisando de que la recompila.
-        # Llamarla directamente da el mismo resultado sin esos avisos.
+        # Llamo a la red directamente y no con .predict(): predict() crea una función de
+        # TensorFlow para cada red y, con una red nueva en cada fold, TensorFlow acaba
+        # avisando de que recompila. El resultado es el mismo, pero sin esos avisos.
         salida = self.model_(_denso(X), training=False)
         cancela = _keras().ops.convert_to_numpy(salida).ravel()
         return np.column_stack([1 - cancela, cancela])
 
     def predict(self, X):
-        # 0,5 como el predict de scikit-learn. main.py no lo usa: umbraliza la
-        # probabilidad contra config.UMBRAL.
+        # Umbral de 0,5, como el predict de scikit-learn. main.py no lo usa: compara la
+        # probabilidad con config.UMBRAL.
         return (self.predict_proba(X)[:, 1] >= 0.5).astype(int)
 
     def guardar_aparte(self, ruta):
-        """La red va a su propio fichero .keras y el .pkl se lleva una copia sin ella.
+        """Guarda la red en un .keras y devuelve una copia sin ella para el .pkl.
 
-        Keras 3 ya deja meter una red en un pickle, pero el formato que garantiza entre
-        versiones es el suyo, .keras. El modelo del Pipeline no se toca: la copia es
-        superficial y solo a ella se le quita la red.
+        Keras 3 permite meter una red en un pickle, pero el formato que garantiza entre
+        versiones es el suyo, .keras. La copia es superficial y solo a ella se le quita
+        la red, así que el modelo del Pipeline no cambia.
         """
         self.model_.save(ruta)
         sin_red = copy.copy(self)
@@ -337,7 +334,7 @@ class RedKeras(ModeloBase):
 
 
 def _denso(X):
-    """Keras no acepta matrices dispersas y trabaja en float32: todo a denso float32."""
+    """Pasa X a denso y float32: Keras no acepta matrices dispersas."""
     X = X.toarray() if hasattr(X, "toarray") else X
     return np.asarray(X, dtype="float32")
 
@@ -357,26 +354,17 @@ REGISTRO = {
 def entrenar_y_comparar(X_train, y_train, preprocesador) -> tuple:
     """Recorre config.MODELOS_ACTIVOS y devuelve (tabla, modelos).
 
-    Protocolo idéntico para los seis, que es lo que hace justa la comparación:
-      · el mismo StratifiedKFold(config.CV_FOLDS) con la misma semilla
-      · el preprocesado DENTRO del Pipeline, para que se ajuste en cada fold
-      · scoring=config.METRICA_PRINCIPAL — si no lo pones, GridSearchCV optimiza
-        accuracy sin decírtelo, y luego presentas F1 en el informe
-      · media ± desviación de la validación cruzada, nunca una sola partición
+    Todos se validan igual para que la comparación sea justa: el mismo StratifiedKFold
+    con la misma semilla, el preprocesado dentro del Pipeline (se ajusta en cada fold)
+    y el scoring explícito: sin él, GridSearchCV elegiría los hiperparámetros por
+    accuracy y no por F1.
 
-    Devuelve DOS cosas:
-      · tabla:   DataFrame ordenado por la métrica principal, una fila por modelo, con
-                 la media y la desviación (ddof=0) de cada métrica en los folds, y
-                 tiempo_s: segundos de reloj de la validación cruzada más el refit. El
-                 de la red incluye unos 8 s de importar TensorFlow la primera vez.
-      · modelos: dict {nombre: Pipeline ajustado con TODO el train}.
-
-    Por qué también los pipelines, y no solo la tabla: el enunciado pide la curva
-    ROC comparativa EN LOS MISMOS EJES. Para dibujar las seis curvas hacen falta seis
-    `predict_proba` sobre el test, o sea los seis modelos ajustados. Si aquí solo
-    saliera la tabla, main.py se quedaría con el ganador y la figura tendría una sola
-    línea. El coste es un refit por modelo sobre el train completo, después de la
-    validación cruzada.
+      · tabla: DataFrame ordenado por la métrica principal, una fila por modelo, con la
+        media y la desviación (ddof=0) de cada métrica en los folds, y tiempo_s, los
+        segundos de la validación cruzada más el refit (en la red incluye unos 8 s de
+        importar TensorFlow la primera vez).
+      · modelos: {nombre: Pipeline reentrenado con todo el train}. Devuelvo los seis y
+        no solo el ganador porque la curva ROC los compara todos en la misma figura.
     """
     # config.DEMO se lee aquí, en tiempo de ejecución: ver data_loader.preparar().
     folds = config.DEMO_FOLDS if config.DEMO else config.CV_FOLDS
@@ -387,7 +375,7 @@ def entrenar_y_comparar(X_train, y_train, preprocesador) -> tuple:
     filas, modelos = [], {}
     for nombre in config.MODELOS_ACTIVOS:
         clase = REGISTRO[nombre]
-        # Un preprocesador propio para cada modelo: si los seis Pipelines compartieran
+        # Cada modelo lleva su propio preprocesador: si los seis Pipelines compartieran
         # el mismo objeto, cada refit reajustaría el de los otros cinco.
         pipeline = Pipeline([("prep", clone(preprocesador)), ("modelo", clase())])
 
@@ -411,12 +399,10 @@ def entrenar_y_comparar(X_train, y_train, preprocesador) -> tuple:
 
 
 def _scoring() -> dict:
-    """Las métricas de la tabla, con su nombre de scikit-learn: la principal y las
-    secundarias de config.
+    """Métricas de la tabla con su nombre en scikit-learn: la principal y las demás.
 
-    precision va con zero_division=0 a propósito: el baseline nunca predice un 1, así
-    que su precision es 0/0, y sin esto scikit-learn avisaría en cada fold de algo que
-    ya sabemos.
+    precision va con zero_division=0 porque el baseline nunca predice un 1 y su
+    precision es 0/0: sin esto, scikit-learn daría un aviso en cada fold.
     """
     scoring = {m: m for m in [config.METRICA_PRINCIPAL, *config.METRICAS_SECUNDARIAS]}
     if "precision" in scoring:
@@ -429,16 +415,15 @@ def _validar(pipeline, X, y, cv, scoring, procesos):
 
     Devuelve ({métrica: array con un valor por fold}, Pipeline ajustado).
 
-    Con "grid" (lo que se entrega) o "random", el buscador prueba la rejilla de
-    espacio_busqueda() sobre los MISMOS folds, se queda con la mejor combinación según
-    la métrica principal y la tabla recoge los folds de esa combinación. Con
-    config.BUSQUEDA = None, los hiperparámetros son los de cada clase y se validan tal
-    cual. Un modelo sin rejilla, como el baseline, se valida tal cual también con la
-    búsqueda activada.
+    Con "grid" (la que uso, ver config.BUSQUEDA) o "random", el buscador prueba la
+    rejilla de espacio_busqueda() sobre los mismos folds, elige la mejor combinación
+    por la métrica principal (refit), la reentrena con todo el train y la tabla recoge
+    sus folds. No es validación cruzada anidada, así que el F1 sale algo optimista
+    (apartado 10 del README). Con config.BUSQUEDA = None, o si el modelo no tiene
+    rejilla (baseline y red), se valida con los hiperparámetros de su clase.
 
-    error_score="raise": si un fold falla, se para con su traza. Por defecto
-    scikit-learn lo convertiría en NaN, y el modelo perdería la comparación sin que
-    nadie viera por qué.
+    error_score="raise": si falla un fold, se para con el error. Por defecto
+    scikit-learn pondría NaN y el modelo perdería la comparación sin ver por qué.
     """
     espacio = pipeline[-1].espacio_busqueda()
     if config.BUSQUEDA is None or not espacio:
@@ -447,8 +432,8 @@ def _validar(pipeline, X, y, cv, scoring, procesos):
         resultados = {m: cv_res[f"test_{m}"] for m in scoring}
         return resultados, pipeline.fit(X, y)
 
-    # Las rejillas son listas, así que "random" no puede sortear más combinaciones de
-    # las que hay: con más iteraciones las recorrería todas y avisaría. Se recorta aquí.
+    # Con "random", n_iter no puede pasar del número de combinaciones de la rejilla
+    # (scikit-learn las probaría todas y daría un aviso), así que se recorta aquí.
     n_iter = min(config.N_ITER_RANDOM, len(ParameterGrid(espacio)))
     buscadores = {"grid": (GridSearchCV, {}),
                   "random": (RandomizedSearchCV, {"n_iter": n_iter,
@@ -468,28 +453,23 @@ def _validar(pipeline, X, y, cv, scoring, procesos):
 def elegir_mejor(tabla):
     """Devuelve el nombre del modelo ganador según config.METRICA_PRINCIPAL.
 
-    La columna se lee de config y no se escribe a mano: si la métrica principal pasara
-    a ser roc_auc, el ganador cambiaría sin tocar esta función.
+    La métrica se lee de config: si la principal pasara a ser roc_auc, no habría que
+    tocar esta función.
     """
     return str(tabla[config.METRICA_PRINCIPAL].idxmax())
 
 
 def guardar(pipeline, nombre, metricas, ruta=None):
-    """Persiste el Pipeline COMPLETO, no solo el estimador, más sus metadatos.
+    """Guarda el Pipeline completo, no solo el estimador, junto con sus metadatos.
 
-    Si guardas solo el modelo, el preprocesado se pierde y las predicciones salen
-    mal sin dar error. Keras es la excepción: config.MODELO_KERAS aparte (pesos y
-    arquitectura) y el resto del Pipeline en config.MODELO_PKL.
+    Guardando solo el modelo se perdería el preprocesado y las predicciones saldrían
+    mal sin dar error. Si gana la red, va aparte en config.MODELO_KERAS y el resto del
+    Pipeline en config.MODELO_PKL.
 
-    Escribe además config.METADATOS con lo que predictor.py necesita para no tener
-    que adivinar nada:
-      · nombre del modelo ganador
-      · umbral realmente usado al predecir (no el que hoy tenga config.UMBRAL:
-        el que se congeló al guardar; si luego mueves config.UMBRAL, las
-        predicciones de un modelo ya guardado no pueden cambiar en silencio)
-      · las columnas crudas que espera de entrada, en orden
-      · métrica principal, semilla y versiones de las librerías
-      · los hiperparámetros del ganador (los que eligió la búsqueda)
+    En config.METADATOS queda lo que necesita predictor.py: el ganador, el umbral con
+    el que se guardó (así, si luego cambia config.UMBRAL, el modelo guardado sigue
+    prediciendo igual), las columnas de entrada en orden, la métrica principal, la
+    semilla, los hiperparámetros del ganador y las versiones de las librerías.
 
     Con otra `ruta`, el .keras y los metadatos van a su lado con los nombres de
     config. Devuelve la ruta del .pkl.
@@ -498,9 +478,9 @@ def guardar(pipeline, nombre, metricas, ruta=None):
     ruta_keras = ruta.with_name(config.MODELO_KERAS.name)
     ruta_metadatos = ruta.with_name(config.METADATOS.name)
 
-    # Los metadatos se montan ANTES de tocar el disco: si algo falla aquí (una métrica
-    # que no es un número), el artefacto anterior se queda entero. Si se escribiera
-    # antes el .pkl, quedaría el modelo nuevo con los metadatos del ganador anterior.
+    # Los metadatos se preparan antes de escribir en disco: si algo falla aquí (una
+    # métrica que no es un número), el modelo guardado anterior queda intacto y no se
+    # mezcla un .pkl nuevo con los metadatos del ganador anterior.
     metadatos = {
         "ganador": nombre,
         "umbral": config.UMBRAL,
@@ -508,7 +488,8 @@ def guardar(pipeline, nombre, metricas, ruta=None):
         "metrica_principal": config.METRICA_PRINCIPAL,
         # Los que eligió la búsqueda, o los de la clase si no la hubo.
         "hiperparametros": pipeline.steps[-1][1].get_params(),
-        # Números nativos: el n de reservas se queda como entero y el resto, float.
+        # Tipos de Python y no de numpy, para el json: el n de reservas como entero y
+        # el resto como float.
         "metricas_test": {k: int(v) if isinstance(v, (int, np.integer)) else float(v)
                           for k, v in metricas.items()},
         "semilla": config.SEMILLA,
@@ -517,8 +498,8 @@ def guardar(pipeline, nombre, metricas, ruta=None):
     }
 
     ruta.parent.mkdir(parents=True, exist_ok=True)
-    # Un .keras de un ganador anterior no se puede quedar al lado del .pkl nuevo:
-    # predictor lo tomaría por la red de este.
+    # Se borra el .keras de un ganador anterior: si se quedara junto al .pkl nuevo,
+    # predictor lo tomaría por la red de este modelo.
     ruta_keras.unlink(missing_ok=True)
     paso, modelo = pipeline.steps[-1]
     para_pkl = Pipeline([*pipeline.steps[:-1], (paso, modelo.guardar_aparte(ruta_keras))])
@@ -532,8 +513,11 @@ def guardar(pipeline, nombre, metricas, ruta=None):
 
 
 def _versiones() -> dict:
-    """Las versiones con las que se entrenó el artefacto. Se leen de los metadatos del
-    paquete instalado, sin importarlo: así no se paga el import de TensorFlow."""
+    """Versiones de Python y de las librerías con las que se entrenó el modelo.
+
+    Se leen de los metadatos de los paquetes instalados, sin importarlos, para no
+    tener que esperar a que se importe TensorFlow.
+    """
     versiones = {"python": platform.python_version()}
     for paquete in ("scikit-learn", "pandas", "numpy", "joblib", "xgboost",
                     "tensorflow", "keras"):
