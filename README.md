@@ -227,7 +227,7 @@ Entrega-Final-ML/
 │
 ├── outputs/                         generado por evaluator.py, SÍ se versiona
 │   ├── confusion_matrix.png
-│   ├── roc_curve.png                los cinco modelos en los mismos ejes
+│   ├── roc_curve.png                los seis modelos en los mismos ejes
 │   ├── feature_importance.png
 │   ├── tabla_comparativa.csv
 │   └── metricas_test.json
@@ -247,7 +247,7 @@ Entrega-Final-ML/
   categorías, medias del escalado), para que se ajuste solo con el train de cada fold.
   Lo que **borra filas** (duplicados, imposibles) va fuera y antes de partir.
 - **Registro de modelos con interfaz común**, imitando por dentro a una librería de
-  AutoML: añadir un sexto modelo es una clase y una línea, sin tocar el bucle.
+  AutoML: añadir un modelo más es una clase y una línea, sin tocar el bucle.
 - **Semilla única** (`config.SEMILLA = 42`) para partición, modelos y validación cruzada.
 
 ---
@@ -309,7 +309,7 @@ No es necesario: los pasos de arriba con `pip` funcionan igual.
 python main.py
 ```
 
-**Versión corta para la defensa** (muestra reducida y menos folds):
+**Versión corta para la defensa** (muestra reducida, menos folds y menos épocas en la red):
 
 ```bash
 python main.py --demo
@@ -372,7 +372,7 @@ se eliminan los duplicados, 17.163 si sí — poned el número real)_:
 **Figuras obligatorias:**
 
 - Matriz de confusión → `outputs/confusion_matrix.png`
-- Curva ROC de los cinco modelos en los mismos ejes → `outputs/roc_curve.png`
+- Curva ROC de los seis modelos en los mismos ejes → `outputs/roc_curve.png`
 - Importancia de variables del ganador → `outputs/feature_importance.png`
 
 ---
