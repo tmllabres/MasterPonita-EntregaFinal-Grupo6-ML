@@ -21,21 +21,16 @@ data/processed/*
 !data/processed/.gitkeep
 
 # ── Modelos ──────────────────────────────────────────────────────────────────
-# Un bosque de 300 árboles sin límite de profundidad se pone en cientos de MB y
-# GitHub corta en 100 MB por fichero. Mira el tamaño tras el primer joblib.dump:
-# si baja de 50 MB con compress=3, súbelo y quita estas dos líneas.
+# Los artefactos entrenados no se versionan: se regeneran con «python main.py» (o
+# «--demo»). El ganador actual pesa unos 3 MB, pero un bosque sin límite de
+# profundidad pasa con facilidad de los 100 MB por fichero que admite GitHub.
 models/*
 !models/.gitkeep
 
 # ── Salidas ──────────────────────────────────────────────────────────────────
-# Las figuras que van en el informe SÍ se suben; comenta esto si las incluyes.
-# outputs/*
-# !outputs/.gitkeep
+# outputs/ SÍ se versiona: son las figuras y tablas que enlaza el README.
 
 # ── Rastro que dejan las librerías al entrenar ───────────────────────────────
-# Ninguno de estos lo escribes tú: los crean TensorFlow, CatBoost o MLflow por su
-# cuenta la primera vez que entrenas. Si no están aquí, el primer «git add .» los
-# sube y ensucia el repositorio.
 # Ojo: en un .gitignore la almohadilla solo abre comentario al PRINCIPIO de la
 # línea. «logs/  # TensorBoard» no ignora logs/, ignora un fichero llamado
 # «logs/  # TensorBoard». Por eso cada comentario va en su propia línea.
@@ -46,13 +41,6 @@ models/*
 
 # TensorBoard
 logs/
-
-# CatBoost, si acabas usándolo en vez de XGBoost
-catboost_info/
-
-# MLflow (bonus): un directorio por experimento
-mlruns/
-mlartifacts/
 
 # ── Sistema ──────────────────────────────────────────────────────────────────
 .DS_Store

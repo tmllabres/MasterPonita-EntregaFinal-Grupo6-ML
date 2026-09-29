@@ -19,7 +19,7 @@ exportado.
 
 | Autor | Correo | Usuario de GitHub |
 |---|---|---|
-| Antonio Martinez Llabres | tmllabres@gmail.com | `tmllabres` |
+| Antonio Martínez Llabrés | tmllabres@gmail.com | `tmllabres` |
 
 La práctica se planteó por parejas, pero el otro integrante la dejó antes de la entrega,
 y así se comunicó al profesor el 29 de septiembre de 2026. Es un trabajo individual:
