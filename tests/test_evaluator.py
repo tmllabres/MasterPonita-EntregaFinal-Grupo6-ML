@@ -1,10 +1,10 @@
-"""Tests de la evaluación y de las figuras.
+"""Tests de evaluator: métricas, figuras e informe.
 
-Lo que se prueba es lo que, si se rompe, no da error: un AUC calculado con los 0/1 en
-vez de con las probabilidades, un PNG en blanco, un JSON que el notebook no puede leer
-o la curva ROC de un solo modelo cuando el enunciado pide todos en los mismos ejes.
-Y como un PNG con algo dibujado no dice QUÉ se dibujó, se espían las figuras antes de
-guardarlas y se mira su contenido.
+Me centro en los fallos que no dan error: un AUC calculado con los 0/1 en vez de con
+las probabilidades, un PNG en blanco, un JSON que el notebook no puede leer o una curva
+ROC con un solo modelo cuando el enunciado pide todos en los mismos ejes. Como un PNG
+con algo dibujado no dice qué se ha dibujado, las figuras se capturan antes de
+guardarlas y se revisa su contenido.
 
     python -m pytest tests/test_evaluator.py -q
 """
@@ -40,7 +40,7 @@ from src import config, data_loader, evaluator, model_trainer
 
 @pytest.fixture(scope="module")
 def prediccion():
-    """y real, probabilidades con algo de señal y el 0/1 que sale de umbralizarlas."""
+    """y real, unas probabilidades con algo de señal y el 0/1 que sale con el umbral."""
     rng = np.random.default_rng(config.SEMILLA)
     y_true = rng.random(2000) < 0.28
     y_proba = np.clip(0.28 + 0.35 * (y_true - 0.28) + rng.normal(0, 0.2, 2000), 0, 1)
@@ -49,8 +49,9 @@ def prediccion():
 
 @pytest.fixture
 def figuras(monkeypatch):
-    """Las Figure que evaluator manda a guardar, para mirar QUÉ se dibujó: el PNG con
-    contenido no distingue una matriz traspuesta ni una ROC con una sola curva."""
+    """Las Figure que evaluator manda guardar, para revisar qué se ha dibujado.
+
+    Con el PNG solo no se distingue una matriz traspuesta ni una ROC con una curva."""
     capturadas = []
     guardar = evaluator._guardar
 
@@ -63,7 +64,7 @@ def figuras(monkeypatch):
 
 
 def _png_con_contenido(ruta) -> bool:
-    """Un PNG que existe y no es un lienzo liso (lo que deja un plt.show() antes de
+    """True si el PNG existe y no está en blanco (lo que deja un plt.show() antes de
     guardar): la desviación de sus píxeles tiene que ser apreciable."""
     return ruta.exists() and imread(ruta)[..., :3].std() > 0.05
 
@@ -71,8 +72,10 @@ def _png_con_contenido(ruta) -> bool:
 # ── metricas() ───────────────────────────────────────────────────────────────
 
 def test_metricas_coinciden_con_scikit_learn_y_salen_como_tipos_nativos(prediccion):
-    """Las cinco métricas, con pos_label=1, y en tipos que json.dumps escribe sin
-    quejarse: el informe y los metadatos las vuelcan tal cual."""
+    """Las cinco métricas coinciden con scikit-learn (pos_label=1) y son tipos nativos.
+
+    Tienen que ser tipos que json.dumps pueda escribir, porque el informe y los
+    metadatos las guardan tal cual."""
     y_true, y_pred, y_proba = prediccion
     m = evaluator.metricas(y_true, y_pred, y_proba)
 
@@ -89,8 +92,10 @@ def test_metricas_coinciden_con_scikit_learn_y_salen_como_tipos_nativos(predicci
 
 
 def test_el_auc_se_calcula_con_las_probabilidades(prediccion):
-    """Con los 0/1 la curva ROC tiene un solo punto y el AUC mide ese umbral, no lo bien
-    que el modelo ordena. Con estas probabilidades, los dos números difieren."""
+    """El AUC se calcula con las probabilidades y no con los 0/1.
+
+    Con los 0/1 la curva ROC tiene un solo punto y el AUC mide ese umbral, no lo bien
+    que el modelo ordena. Con estos datos los dos números son distintos."""
     y_true, y_pred, y_proba = prediccion
     m = evaluator.metricas(y_true, y_pred, y_proba)
     assert m["roc_auc"] == pytest.approx(roc_auc_score(y_true, y_proba))
@@ -98,15 +103,16 @@ def test_el_auc_se_calcula_con_las_probabilidades(prediccion):
 
 
 def test_sin_probabilidades_no_hay_auc():
-    """Sin y_proba no se puede calcular el AUC: la clave no aparece, en vez de un número
-    inventado con los 0/1."""
+    """Sin y_proba, metricas() no devuelve roc_auc en vez de calcularlo con los 0/1."""
     m = evaluator.metricas([0, 1, 1, 0], [0, 1, 0, 0])
     assert "roc_auc" not in m
 
 
 def test_un_modelo_que_nunca_predice_cancela_no_avisa_ni_revienta():
-    """El baseline nunca predice un 1: su precision es 0/0. zero_division=0 la declara 0
-    sin avisar, que es lo que pide la lista de tareas."""
+    """Un modelo que nunca predice «cancela» da precision, recall y F1 de 0 sin avisos.
+
+    Es el caso del baseline: su precision es 0/0, y con zero_division=0 vale 0 sin
+    ningún warning."""
     y_true = np.array([0, 1, 1, 0, 1])
     with warnings.catch_warnings():
         warnings.simplefilter("error")
@@ -118,10 +124,11 @@ def test_un_modelo_que_nunca_predice_cancela_no_avisa_ni_revienta():
 # ── Las figuras ──────────────────────────────────────────────────────────────
 
 def test_ninguna_figura_pasa_por_pyplot():
-    """plt.show() vacía la figura y deja el PNG en blanco, y pyplot acumula figuras en
-    memoria de una llamada a otra. El módulo dibuja sobre Figure: ni importa pyplot ni
-    llama a ningún show(). Se mira el código, no el texto, porque los docstrings sí
-    hablan de los dos."""
+    """evaluator no importa pyplot ni llama a ningún show(): dibuja sobre Figure.
+
+    plt.show() vacía la figura y deja el PNG en blanco, y pyplot acumula figuras en
+    memoria de una llamada a otra. Se analiza el código con ast y no el texto, porque
+    los docstrings sí nombran a los dos."""
     arbol = ast.parse(inspect.getsource(evaluator))
     importados = [alias.name for nodo in ast.walk(arbol)
                   if isinstance(nodo, (ast.Import, ast.ImportFrom))
@@ -134,7 +141,7 @@ def test_ninguna_figura_pasa_por_pyplot():
 
 
 def test_matriz_de_confusion_guarda_un_png_con_contenido(prediccion, tmp_path):
-    """La figura se escribe donde se le pide, con algo dibujado, y la matriz que
+    """La figura se guarda en la ruta pedida, no está en blanco y la matriz que
     devuelve es la de scikit-learn: filas = real, columnas = predicho."""
     y_true, y_pred, _ = prediccion
     ruta = tmp_path / "confusion.png"
@@ -145,9 +152,11 @@ def test_matriz_de_confusion_guarda_un_png_con_contenido(prediccion, tmp_path):
 
 def test_la_matriz_dibuja_cada_conteo_en_su_celda_con_el_porcentaje_de_su_fila(
         figuras, tmp_path):
-    """2.000 reservas que no cancelan (1.500 bien, 500 mal) y 1.000 que sí (250 mal, 750
-    bien). Por fila salen 75/25 y 25/75; por columna saldrían 85,7/14,3 y 40/60. Y las
-    cifras con punto de miles y coma decimal, como el README."""
+    """Cada celda lleva su conteo y el porcentaje sobre su fila, en formato español.
+
+    Con 2.000 reservas que no cancelan (1.500 bien, 500 mal) y 1.000 que sí (250 mal,
+    750 bien), por fila salen 75/25 y 25/75; por columna saldrían 85,7/14,3 y 40/60.
+    Las cifras van con punto de miles y coma decimal, como en el README."""
     y_true = np.array([0] * 2000 + [1] * 1000)
     y_pred = np.array([0] * 1500 + [1] * 500 + [0] * 250 + [1] * 750)
     evaluator.matriz_confusion(y_true, y_pred, tmp_path / "confusion.png")
@@ -173,8 +182,10 @@ def _tres_modelos(prediccion):
 
 
 def test_la_curva_roc_lleva_todos_los_modelos_y_su_auc(prediccion, tmp_path):
-    """Una curva por modelo, todas en la misma figura, con su AUC calculado sobre las
-    probabilidades. Recibe el dict entero, no solo el ganador."""
+    """curva_roc() devuelve el AUC de cada modelo, calculado con sus probabilidades.
+
+    Recibe el dict entero, no solo el ganador, y dibuja todas las curvas en la misma
+    figura."""
     y_true = prediccion[0]
     modelos_proba = _tres_modelos(prediccion)
     ruta = tmp_path / "roc.png"
@@ -188,9 +199,11 @@ def test_la_curva_roc_lleva_todos_los_modelos_y_su_auc(prediccion, tmp_path):
 
 def test_la_roc_dibuja_la_curva_de_cada_modelo_y_el_baseline_hace_de_diagonal(
         prediccion, figuras, tmp_path):
-    """Una línea por modelo con SU curva (la de las probabilidades, no la de los 0/1),
-    la leyenda de mayor a menor AUC con el número, y el ganador dibujado por encima. El
-    baseline es la diagonal del azar: no se dibuja otra encima."""
+    """La ROC dibuja una línea por modelo con su curva y el baseline hace de diagonal.
+
+    Cada línea es la curva de las probabilidades (no la de los 0/1), la leyenda va de
+    mayor a menor AUC con el valor y el ganador se dibuja por encima. El baseline ya es
+    la diagonal del azar, así que no se dibuja otra."""
     y_true = prediccion[0]
     modelos_proba = _tres_modelos(prediccion)
     aucs = evaluator.curva_roc(modelos_proba, y_true, tmp_path / "roc.png")
@@ -230,8 +243,8 @@ def test_sin_baseline_la_diagonal_del_azar_va_aparte(prediccion, figuras, tmp_pa
 
 @pytest.fixture(scope="module")
 def datos_demo():
-    """El CSV real en modo demo: la importancia se calcula con un Pipeline de verdad,
-    sobre las columnas crudas."""
+    """El CSV real en modo demo, para calcular la importancia con un Pipeline real
+    sobre las columnas originales."""
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(config, "DEMO", True)
         return data_loader.preparar()
@@ -250,14 +263,13 @@ def arbol_demo(datos_demo):
                          ids=["con_feature_importances", "red_sin_feature_importances"])
 def test_las_importancias_salen_por_variable_original(modelo, datos_demo, tmp_path,
                                                       monkeypatch):
-    """Una fila por columna CRUDA (27), no por columna del one-hot (97), de mayor a menor,
-    y con la misma receta si gana un modelo sin feature_importances_, como la red.
+    """Sale una fila por variable original (27, no las 97 del one-hot), ordenadas.
 
-    Los procesos, con la regla de la validación cruzada: la red en uno solo (en paralelo,
-    cada hijo arrancaría TensorFlow: unos 12 GB sin ganar tiempo) y el resto con
-    config.N_JOBS. Se espía el n_jobs pedido y se ejecuta en un proceso para ir rápido.
-    La red necesita unas cuantas épocas: con dos no predice ningún «cancela», su F1 ya
-    es 0 y barajar no puede bajarlo."""
+    También con la red, que no tiene feature_importances_ y necesita unas cuantas
+    épocas: con dos no predice ningún «cancela», su F1 ya es 0 y barajar no puede
+    bajarlo. Los procesos siguen la regla de la validación cruzada: la red en uno solo
+    (en paralelo, cada proceso cargaría TensorFlow sin ganar tiempo) y el resto con
+    config.N_JOBS. Se comprueba el n_jobs pedido y se ejecuta con uno para ir rápido."""
     monkeypatch.setattr(config, "IMPORTANCIA_REPETICIONES", 2)
     pedidos = []
     real = evaluator.permutation_importance
@@ -285,9 +297,11 @@ def test_las_importancias_salen_por_variable_original(modelo, datos_demo, tmp_pa
 
 def test_las_importancias_miden_la_metrica_principal_sobre_la_X_que_reciben(
         arbol_demo, datos_demo, figuras, tmp_path, monkeypatch):
-    """La tabla es permutation_importance con la métrica principal al umbral de config,
-    sobre la X que se le pasa, cada media en la fila de SU variable. La figura enseña
-    las TOP primeras, la más importante arriba, con su valor y en el color del ganador."""
+    """La tabla es permutation_importance con la métrica principal al umbral de config.
+
+    Se calcula sobre la X que recibe y cada media va en la fila de su variable. La
+    figura muestra las config.TOP_IMPORTANCIAS primeras, la más importante arriba, con
+    su valor y en el color del ganador."""
     monkeypatch.setattr(config, "N_JOBS", 1)
     monkeypatch.setattr(config, "IMPORTANCIA_REPETICIONES", 2)
     monkeypatch.setattr(config, "TOP_IMPORTANCIAS", 5)
@@ -313,9 +327,11 @@ def test_las_importancias_miden_la_metrica_principal_sobre_la_X_que_reciben(
 
 def test_la_importancia_usa_el_umbral_de_config_tambien_en_paralelo(
         arbol_demo, datos_demo, tmp_path, monkeypatch):
-    """Con el umbral movido, la importancia se mide a ESE umbral, igual que las métricas
-    de test. Y en paralelo también: los procesos hijos importan config de cero, así que
-    si leyeran el umbral de config verían el 0,50 y la tabla cambiaría."""
+    """La importancia usa el umbral de config, también con varios procesos.
+
+    Con otro umbral, la importancia se mide a ese umbral, igual que las métricas de
+    test. Los procesos hijos importan config de cero: si leyeran el umbral de config
+    verían el 0,50 y la tabla cambiaría."""
     monkeypatch.setattr(config, "UMBRAL", 0.35)
     monkeypatch.setattr(config, "IMPORTANCIA_REPETICIONES", 2)
     X, y = datos_demo["X_test"].iloc[:1500], datos_demo["y_test"].iloc[:1500]
@@ -344,9 +360,11 @@ def tabla_de_juguete():
 
 
 def test_el_informe_escribe_lo_que_lee_el_notebook(tabla_de_juguete, prediccion, tmp_path):
-    """La tabla vuelve a leerse con su columna «modelo» (el notebook la pasa a
-    to_markdown sin índice) y el JSON es plano, porque el notebook lo lee con
-    pd.Series. El ganador sale con la misma regla que elegir_mejor."""
+    """El CSV y el JSON de informe() tienen el formato que lee el notebook.
+
+    La tabla se vuelve a leer con su columna «modelo» (el notebook la pasa a
+    to_markdown sin índice) y el JSON es plano porque el notebook lo lee con pd.Series.
+    El ganador sale con la misma regla que elegir_mejor."""
     y_true, y_pred, y_proba = prediccion
     m = evaluator.metricas(y_true, y_pred, y_proba)
     ruta_tabla, ruta_json = evaluator.informe(tabla_de_juguete, m, tmp_path)
@@ -369,8 +387,10 @@ def test_el_informe_escribe_lo_que_lee_el_notebook(tabla_de_juguete, prediccion,
 
 def test_el_informe_escribe_en_la_carpeta_que_se_le_pasa(tabla_de_juguete, tmp_path,
                                                          monkeypatch):
-    """Con `ruta`, nada va a config.OUTPUTS: si no, cada pytest pisaría outputs/ —lo que
-    copian el README y el notebook— con la tabla de juguete."""
+    """Con `ruta`, informe() escribe ahí y no toca config.OUTPUTS.
+
+    Si no, cada ejecución de pytest sobrescribiría outputs/, de donde salen las cifras
+    del README y del notebook, con la tabla de juguete."""
     reales = tmp_path / "outputs_reales"
     monkeypatch.setattr(config, "OUTPUTS", reales)
     carpeta = tmp_path / "aqui"
@@ -382,10 +402,12 @@ def test_el_informe_escribe_en_la_carpeta_que_se_le_pasa(tabla_de_juguete, tmp_p
 
 def test_el_informe_normaliza_tipos_y_elige_el_ganador_con_la_tabla_desordenada(
         tmp_path, monkeypatch):
-    """n sale entero aunque llegue de numpy (el README cita 17.163, no 17163.0), un
-    float32 no revienta json, el flag demo se escribe tal cual, el ganador es el de la
-    métrica principal aunque la tabla no venga ordenada y el CSV no redondea a dos
-    decimales las desviaciones."""
+    """informe() convierte los tipos de numpy y no depende del orden de la tabla.
+
+    n sale como entero (el README cita 17.163, no 17163.0), un float32 no hace fallar a
+    json, el indicador demo se escribe tal cual, el ganador es el de la métrica
+    principal aunque la tabla venga desordenada, y el CSV no redondea las
+    desviaciones."""
     monkeypatch.setattr(config, "DEMO", True)
     tabla = pd.DataFrame({"f1": [0.6612, 0.6856, 0.0], "f1_std": [0.0123, 0.0042, 0.0]},
                          index=pd.Index(["red_keras", "boosting", "baseline"],
@@ -403,8 +425,10 @@ def test_el_informe_normaliza_tipos_y_elige_el_ganador_con_la_tabla_desordenada(
 
 
 def test_un_informe_con_nan_no_escribe_nada(tabla_de_juguete, tmp_path):
-    """Un NaN en las métricas acabaría copiado en el README. Mejor que reviente antes de
-    tocar el disco: ni la tabla nueva ni el JSON."""
+    """Con un NaN en las métricas, informe() lanza un error antes de escribir nada.
+
+    Si no, el NaN acabaría copiado en el README; así no se escribe ni la tabla nueva ni
+    el JSON."""
     with pytest.raises(ValueError):
         evaluator.informe(tabla_de_juguete, {"f1": float("nan")}, tmp_path)
     assert not any(tmp_path.iterdir())
@@ -413,10 +437,12 @@ def test_un_informe_con_nan_no_escribe_nada(tabla_de_juguete, tmp_path):
 # ── De principio a fin ───────────────────────────────────────────────────────
 
 def test_main_llega_hasta_el_final_y_deja_las_salidas(monkeypatch, tmp_path):
-    """El flujo completo de main.py en modo demo, con tres modelos rápidos y las salidas
-    redirigidas a una carpeta temporal: los cinco ficheros de outputs/ y el modelo con
-    sus metadatos. Y que cada función reciba lo que toca: la ROC con TODOS los modelos,
-    la importancia y la matriz sobre el test, y el mismo n en el JSON y los metadatos."""
+    """main.py en modo demo llega hasta el final y deja todas las salidas.
+
+    Con tres modelos rápidos y las salidas en una carpeta temporal, comprueba los cinco
+    ficheros de outputs/, el modelo con sus metadatos y que cada función recibe lo que
+    le corresponde: la ROC con todos los modelos, la importancia y la matriz sobre el
+    test, y el mismo n en el JSON y en los metadatos."""
     salidas, modelos = tmp_path / "outputs", tmp_path / "models"
     for clave, ruta in {
         "OUTPUTS": salidas,

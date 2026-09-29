@@ -1,8 +1,7 @@
-"""Tests de la inferencia: cargar el artefacto y predecir sin reentrenar.
+"""Tests de predictor: cargar el modelo guardado y predecir sin reentrenar.
 
-Lo que se prueba es lo que un predictor puede hacer mal sin avisar: predecir con el
-umbral de config en vez del que se congeló al guardar, o con las columnas en otro
-orden.
+Me centro en lo que puede salir mal sin avisar: predecir con el umbral de config en
+vez del que se guardó con el modelo, o con las columnas en otro orden.
 
     python -m pytest tests/test_predictor.py -q
 """
@@ -29,7 +28,7 @@ def datos():
 @pytest.fixture
 def artefacto(datos, tmp_path, monkeypatch):
     """Un árbol entrenado y guardado con model_trainer.guardar() en una carpeta
-    temporal, con config apuntando ahí, como lo deja main.py en models/."""
+    temporal, con config apuntando a ella, igual que main.py lo deja en models/."""
     for clave in ("MODELO_PKL", "MODELO_KERAS", "METADATOS"):
         monkeypatch.setattr(config, clave, tmp_path / getattr(config, clave).name)
     pipeline = Pipeline([("prep", clone(datos["preprocesador"])),
@@ -40,14 +39,16 @@ def artefacto(datos, tmp_path, monkeypatch):
 
 
 def test_sin_modelo_entrenado_dice_que_hay_que_ejecutar_main(tmp_path):
-    """El error tiene que decir qué hacer, no solo que falta un fichero."""
+    """Sin modelo guardado, el error dice que hay que ejecutar main.py.
+
+    No basta con decir que falta un fichero: el mensaje tiene que decir qué hacer."""
     with pytest.raises(FileNotFoundError, match="python main.py"):
         predictor.cargar(tmp_path / "mejor_modelo.pkl")
 
 
 def test_el_modelo_recargado_predice_lo_mismo_que_el_entrenado(artefacto, datos):
-    """Es la prueba de que el artefacto sirve: recargado desde disco, sin reentrenar,
-    da las mismas probabilidades sobre reservas crudas."""
+    """El modelo recargado desde disco, sin reentrenar, da las mismas probabilidades
+    que el entrenado sobre reservas con las columnas originales."""
     recargado, metadatos = predictor.cargar()
     assert metadatos["ganador"] == "arbol"
     proba = predictor.predecir_proba(recargado, datos["X_test"])
@@ -57,8 +58,10 @@ def test_el_modelo_recargado_predice_lo_mismo_que_el_entrenado(artefacto, datos)
 
 def test_predecir_usa_el_umbral_de_los_metadatos_y_no_el_de_config(artefacto, datos,
                                                                   monkeypatch):
-    """Si se moviera config.UMBRAL después de guardar, un modelo ya guardado no puede
-    cambiar sus predicciones: manda el umbral que se congeló en metadatos.json."""
+    """predecir() usa el umbral guardado en metadatos.json, no el de config.
+
+    Si config.UMBRAL cambiara después de guardar, el modelo guardado no debe cambiar
+    sus predicciones."""
     ruta_metadatos = config.METADATOS
     metadatos = json.loads(ruta_metadatos.read_text(encoding="utf-8"))
     metadatos["umbral"] = 0.3
@@ -72,9 +75,10 @@ def test_predecir_usa_el_umbral_de_los_metadatos_y_no_el_de_config(artefacto, da
 
 
 def test_las_columnas_se_toman_por_nombre_y_se_avisa_si_falta_alguna(artefacto, datos):
-    """Una reserva puede llegar con las columnas en otro orden o con columnas de más (un
-    CSV crudo trae is_canceled y las de fuga): se usan las del train, por nombre. Si
-    falta una, el error dice cuál."""
+    """Las columnas se toman por nombre y, si falta alguna, el error dice cuál.
+
+    Una reserva puede llegar con las columnas en otro orden o con columnas de más (un
+    CSV crudo trae is_canceled y las de fuga): se usan las del train, por nombre."""
     recargado, _ = predictor.cargar()
     X = datos["X_test"].head(50)
     desordenadas = X[X.columns[::-1]].assign(is_canceled=1, reservation_status="Canceled")
@@ -85,14 +89,16 @@ def test_las_columnas_se_toman_por_nombre_y_se_avisa_si_falta_alguna(artefacto, 
 
 
 def test_un_pipeline_sin_metadatos_no_predice(artefacto, datos):
-    """Sin pasar por cargar() no se sabe con qué umbral se entrenó: mejor un error que
-    usar el de config a escondidas."""
+    """Un Pipeline que no ha pasado por cargar() no predice.
+
+    Sin los metadatos no se sabe con qué umbral se entrenó, y prefiero un error a usar
+    el de config sin avisar."""
     with pytest.raises(ValueError, match="cargar"):
         predictor.predecir(artefacto, datos["X_test"].head(5))
 
 
 def test_la_demo_predice_reservas_del_test_con_la_respuesta_al_lado(artefacto, monkeypatch):
-    """python -m src.predictor: n reservas que el modelo no vio, con su probabilidad,
+    """La demo (python -m src.predictor) enseña n reservas del test con su probabilidad,
     su 0/1 y lo que pasó de verdad."""
     monkeypatch.setattr(config, "DEMO", config.DEMO)  # la demo lo cambia; así se restaura
     tabla = predictor.demo(n=8)

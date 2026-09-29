@@ -1,11 +1,11 @@
-"""Exporta el README a docs/informe_final.pdf, que es lo que se sube a PontIA.
+"""Exporta el README a docs/informe_final.pdf, que es el informe que se sube a PontIA.
 
     python docs/exportar_informe.py
 
 Convierte el README a HTML con el módulo markdown y lo imprime a PDF con Chrome o Edge
-en modo headless (no hace falta pandoc ni LaTeX). El HTML se escribe un momento en la
-raíz del repositorio para que las rutas de las figuras (outputs/...) funcionen igual que
-en GitHub, y se borra al terminar.
+en modo headless, así no hace falta pandoc ni LaTeX. El HTML se escribe temporalmente
+en la raíz del repositorio para que las rutas de las figuras (outputs/...) funcionen
+igual que en GitHub, y se borra al terminar.
 """
 from __future__ import annotations
 
@@ -36,7 +36,9 @@ th, td { border: 1px solid #bbb; padding: 3px 6px; vertical-align: top; }
 th { background: #f2f2f2; }
 pre { background: #f6f6f6; padding: 8px; font-size: 8pt; white-space: pre-wrap; }
 code { font-size: 90%; }
-img { max-width: 78%; display: block; margin: 10px auto; page-break-inside: avoid; }
+img { max-width: 60%; display: block; margin: 10px auto; page-break-inside: avoid; }
+h1, h2, h3, summary, p:has(+ pre), p:has(+ ol), p:has(+ table), p:has(+ p > img) { break-after: avoid; }
+table, pre { break-inside: avoid; }
 blockquote { color: #444; border-left: 3px solid #ccc; margin-left: 0; padding-left: 12px; }
 """
 
@@ -52,13 +54,14 @@ def navegador() -> str:
 
 
 def main() -> None:
-    # El markdown dentro de <details> solo se convierte si el bloque lo pide, y en el
-    # PDF tiene que verse abierto: impreso, un <details> cerrado no enseña nada.
+    # El markdown dentro de <details> solo se convierte con markdown="1", y en el PDF
+    # el bloque tiene que salir abierto, porque impreso y cerrado no se ve su contenido.
     texto = (RAIZ / "README.md").read_text(encoding="utf-8")
     texto = texto.replace("<details>", '<details open markdown="1">')
     cuerpo = markdown.markdown(texto, extensions=["tables", "fenced_code", "md_in_html"])
-    # Los enlaces relativos (docs/..., notebooks/...) apuntarían al disco de quien lo
-    # exporta: en el PDF van a su página en GitHub. Las imágenes sí se leen del disco.
+    # Los enlaces relativos (docs/..., notebooks/...) apuntarían al disco del ordenador
+    # donde se exporta, así que en el PDF llevan a GitHub. Las imágenes sí se leen del
+    # disco.
     cuerpo = re.sub(r'href="(?!https?:|#|mailto:)([^"]+)"',
                     lambda m: f'href="{REPO}/blob/main/{m.group(1)}"', cuerpo)
     html = RAIZ / "_informe_final.html"
