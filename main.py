@@ -10,32 +10,32 @@ Es lo que se ejecuta delante del profesor en la defensa.
 """
 import argparse
 
-from src import config, data_loader, evaluator, model_trainer
+from src import config, data_loader, evaluator, model_trainer, predictor
 
 
 def main(demo: bool = False) -> None:
     config.DEMO = demo or config.DEMO
 
     # 1. Datos: cargar, limpiar, partir, y preparar el preprocesador sin ajustar.
-    print("[1/5] Cargando y preparando datos…")
+    print("[1/6] Cargando y preparando datos…")
     d = data_loader.preparar()
 
     # 2. Entrenar los seis con el mismo protocolo y compararlos por validación
     #    cruzada dentro del train. El test no se toca aquí.
     #    Devuelve la tabla Y los pipelines ajustados: los seis hacen falta para la
     #    curva ROC comparativa del paso 4.
-    print("[2/5] Entrenando y comparando modelos…")
+    print("[2/6] Entrenando y comparando modelos…")
     tabla, modelos = model_trainer.entrenar_y_comparar(d["X_train"], d["y_train"],
                                                        d["preprocesador"])
     print(tabla)
 
     # 3. Elegir el ganador por la métrica principal.
-    print("[3/5] Eligiendo el mejor modelo…")
+    print("[3/6] Eligiendo el mejor modelo…")
     ganador = model_trainer.elegir_mejor(tabla)
     pipeline = modelos[ganador]
 
     # 4. Evaluar UNA sola vez sobre el test, y generar las figuras obligatorias.
-    print(f"[4/5] Evaluando «{ganador}» sobre el test…")
+    print(f"[4/6] Evaluando «{ganador}» sobre el test…")
     y_proba = pipeline.predict_proba(d["X_test"])[:, 1]
 
     # El 0/1 sale de comparar contra config.UMBRAL, no de pipeline.predict(): así el
@@ -56,8 +56,14 @@ def main(demo: bool = False) -> None:
     print(m)
 
     # 5. Persistir el artefacto para que predictor.py pueda usarlo sin reentrenar.
-    print("[5/5] Guardando el modelo…")
+    print("[5/6] Guardando el modelo…")
     model_trainer.guardar(pipeline, ganador, m)
+
+    # 6. Cerrar el círculo: recargar el artefacto desde disco, como lo haría quien solo
+    #    tenga models/, y predecir unas reservas del test con la respuesta real al lado.
+    print("[6/6] Recargando el modelo guardado y prediciendo…")
+    recargado, _ = predictor.cargar()
+    print(predictor.comparar(recargado, d["X_test"].head(5), d["y_test"].head(5)))
     print("Listo. Figuras en outputs/, modelo en models/.")
 
 
