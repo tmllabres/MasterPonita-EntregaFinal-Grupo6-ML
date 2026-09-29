@@ -19,7 +19,7 @@ import markdown
 
 RAIZ = Path(__file__).resolve().parent.parent
 PDF = RAIZ / "docs" / "informe_final.pdf"
-REPO = "https://github.com/tmllabres/MasterPonita-ML-EntregaFinal-Grupo6"
+REPO = "https://github.com/tmllabres/MasterPonita-EntregaFinal-Grupo6-ML"
 
 NAVEGADORES = [
     Path.home() / "AppData/Local/Google/Chrome/Application/chrome.exe",

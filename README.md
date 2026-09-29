@@ -7,7 +7,7 @@ se va a cancelar, elige el mejor y lo deja guardado para hacer predicciones nuev
 > **Máster en IA, Cloud Computing y DevOps** · Machine Learning y Deep Learning ·
 > Práctica de evaluación final
 >
-> **Repositorio:** <https://github.com/tmllabres/MasterPonita-ML-EntregaFinal-Grupo6>
+> **Repositorio:** <https://github.com/tmllabres/MasterPonita-EntregaFinal-Grupo6-ML>
 
 Este README es también el informe final: `docs/informe_final.pdf` es este mismo fichero
 exportado a PDF.
@@ -154,7 +154,7 @@ Esta tabla resume lo que encontré y qué decisión tomé en cada caso:
 He separado el código en módulos, cada uno con una tarea, y `main.py` los llama en orden:
 
 ```
-MasterPonita-ML-EntregaFinal-Grupo6/
+MasterPonita-EntregaFinal-Grupo6-ML/
 ├── main.py                          ejecuta todo el proceso: python main.py
 ├── requirements.txt                 librerías con la versión fijada
 ├── .python-version                  3.12
@@ -256,8 +256,8 @@ que mide el F1 (con un umbral de 0,5).
 `requirements.txt`.
 
 ```bash
-git clone https://github.com/tmllabres/MasterPonita-ML-EntregaFinal-Grupo6.git
-cd MasterPonita-ML-EntregaFinal-Grupo6
+git clone https://github.com/tmllabres/MasterPonita-EntregaFinal-Grupo6-ML.git
+cd MasterPonita-EntregaFinal-Grupo6-ML
 
 python -m venv .venv            # con Python 3.12 (compruébalo con python --version)
 # Windows con varias versiones instaladas: py -3.12 -m venv .venv
