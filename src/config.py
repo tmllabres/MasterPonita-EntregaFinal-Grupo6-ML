@@ -138,18 +138,22 @@ IMPORTANCIA_REPETICIONES = 5
 TOP_IMPORTANCIAS = 15
 
 # ── Ajuste de hiperparámetros ────────────────────────────────────────────────
-# DESACTIVADO a propósito para la entrega del 15 de septiembre.
+# GridSearchCV sobre la rejilla que declara cada modelo en espacio_busqueda(), con los
+# mismos folds y la misma métrica que la comparación. Cada modelo se compara con su
+# mejor combinación, no con la primera que se nos ocurrió.
 #
-# No es que no sepamos hacerlo: el comparador está diseñado para soportarlo y cada
-# modelo declara su espacio_busqueda(). Es una decisión de calendario. Con 9 días,
-# 6 modelos x 5 folds x 30 iteraciones sobre 68.648 filas se va a horas de cómputo,
-# y el riesgo de descubrir un fallo a las tres horas de ejecución no compensa.
+# "grid" y no "random": las rejillas son pequeñas (4, 15, 18 y 27 combinaciones) e
+# incluyen los valores por defecto de cada clase, así que la búsqueda nunca deja a un
+# modelo peor que sin ella. Con "random" y 10 al azar sí puede: en la demo, el árbol
+# bajaba de 0,604 a 0,599 porque el sorteo se dejaba fuera su combinación por defecto.
+# La red no entra: cada entrenamiento son ~20 s en un solo proceso (ver
+# RedKeras.espacio_busqueda()).
 #
-# Sin búsqueda, la ejecución completa dura minutos y el sistema entrega entero, que es
-# lo que el enunciado puntúa. Se declara como limitación en el apartado 10 del README.
-# Para activarlo, si sobrara tiempo: BUSQUEDA = "random". No hay que tocar nada más.
-BUSQUEDA = None           # "grid" | "random" | None
-N_ITER_RANDOM = 30        # solo si BUSQUEDA == "random"
+# El precio, declarado en el apartado 10 del README: la validación cruzada no es
+# anidada. La combinación se elige mirando los mismos folds con los que se mide, así
+# que el F1 de la tabla sale algo optimista. La cifra honesta es la del test.
+BUSQUEDA = "grid"         # "grid" | "random" | None
+N_ITER_RANDOM = 10        # solo si BUSQUEDA == "random"
 N_JOBS = -1               # ojo: n_jobs=1 para la red de Keras, o se sobre-suscribe la CPU
 
 # ── Qué modelos entran en la comparación ─────────────────────────────────────
