@@ -7,22 +7,22 @@ formas concretas: que `preparar()` devuelve un dict con cinco claves exactas, qu
 `entrenar_y_comparar()` devuelve DOS cosas, que `metricas()` acepta las probabilidades
 como tercer argumento. Nada de eso está escrito en el código: vive en los docstrings.
 
-Y durante el sprint A y B trabajan **en paralelo y a ciegas**, cada uno contra su propio
-stub. Si uno renombra `preprocesador` a `prep` o devuelve solo la tabla en vez de la
-tupla, no se entera nadie hasta el día que se juntan las dos mitades, y entonces se
-rompen `main.py`, `evaluator` y `predictor` a la vez.
+Los módulos se implementaron por bloques, cada uno contra los stubs de los demás. Si uno
+renombra `preprocesador` a `prep` o devuelve solo la tabla en vez de la tupla, no se nota
+hasta que se ejecuta el pipeline entero, y entonces se rompen `main.py`, `evaluator` y
+`predictor` a la vez.
 
 Estos tests convierten ese acuerdo tácito en algo que se pone ROJO en el acto.
 
-Por qué pasan HOY, con los módulos aún sin implementar
-------------------------------------------------------
+Por qué no ejecutan nada
+------------------------
 Porque comprueban la FIRMA, no el comportamiento: `inspect.signature` lee los nombres y
-el orden de los parámetros sin llegar a ejecutar la función, así que un cuerpo que sea
-`raise NotImplementedError` da igual. Son la única parte de la suite que puede estar en
-verde desde el minuto uno, y por eso son el sitio donde se congela el contrato.
+el orden de los parámetros sin llegar a ejecutar la función. Por eso estaban en verde
+desde el primer commit, con los cuerpos aún en `raise NotImplementedError`, y son el
+sitio donde se congela el contrato.
 
-Para cambiar una firma: se avisa al otro, se cambia el test EN EL MISMO COMMIT y se dice
-en el mensaje del commit. Nunca en silencio.
+Para cambiar una firma: se cambia el test EN EL MISMO COMMIT y se dice en el mensaje
+del commit. Nunca en silencio.
 
     python -m pytest tests/test_contrato.py -q
 """
@@ -46,7 +46,7 @@ def parametros(funcion) -> tuple[str, ...]:
 
 
 # ── Las cuatro firmas congeladas ─────────────────────────────────────────────
-# Si tocas esta tabla, estás cambiando el contrato. Avisa al otro.
+# Si tocas esta tabla, estás cambiando el contrato: dilo en el mensaje del commit.
 
 FIRMAS = [
     # data_loader
@@ -95,7 +95,7 @@ def fuente_main() -> str:
 
 
 def test_main_solo_pide_las_claves_que_preparar_promete():
-    """El dict de `preparar()` es el punto donde A y B se tocan de verdad.
+    """El dict de `preparar()` es el punto donde los datos y los modelos se tocan de verdad.
 
     Sus claves no las verifica ningún `def`: si data_loader devuelve "prep" y main.py
     pide "preprocesador", el fallo es un KeyError en el paso [2/5], después de haber
