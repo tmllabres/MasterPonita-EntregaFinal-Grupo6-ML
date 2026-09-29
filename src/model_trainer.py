@@ -280,8 +280,10 @@ class RedKeras(ModeloBase):
         return red
 
     def espacio_busqueda(self) -> dict:
-        return {"modelo__capas": [(32,), (64, 32), (128, 64)],
-                "modelo__dropout": [0.1, 0.2, 0.4]}
+        # Vacía a propósito: cada entrenamiento de la red son ~20 s en un solo proceso,
+        # y una rejilla de 9 combinaciones x 5 folds se iría a un cuarto de hora. La
+        # arquitectura se fija a priori y se valida tal cual, como el baseline.
+        return {}
 
     def fit(self, X, y):
         keras = _keras()
@@ -427,12 +429,12 @@ def _validar(pipeline, X, y, cv, scoring, procesos):
 
     Devuelve ({métrica: array con un valor por fold}, Pipeline ajustado).
 
-    Con config.BUSQUEDA = None, que es lo que se entrega, los hiperparámetros son los
-    de cada clase y se validan tal cual. Con "grid" o "random", el buscador prueba la
-    rejilla de espacio_busqueda() sobre los MISMOS folds, se queda con la mejor
-    combinación según la métrica principal y la tabla recoge los folds de esa
-    combinación. Un modelo sin rejilla, como el baseline, se valida tal cual también
-    con la búsqueda activada.
+    Con "grid" (lo que se entrega) o "random", el buscador prueba la rejilla de
+    espacio_busqueda() sobre los MISMOS folds, se queda con la mejor combinación según
+    la métrica principal y la tabla recoge los folds de esa combinación. Con
+    config.BUSQUEDA = None, los hiperparámetros son los de cada clase y se validan tal
+    cual. Un modelo sin rejilla, como el baseline, se valida tal cual también con la
+    búsqueda activada.
 
     error_score="raise": si un fold falla, se para con su traza. Por defecto
     scikit-learn lo convertiría en NaN, y el modelo perdería la comparación sin que
@@ -487,6 +489,7 @@ def guardar(pipeline, nombre, metricas, ruta=None):
         predicciones de un modelo ya guardado no pueden cambiar en silencio)
       · las columnas crudas que espera de entrada, en orden
       · métrica principal, semilla y versiones de las librerías
+      · los hiperparámetros del ganador (los que eligió la búsqueda)
 
     Con otra `ruta`, el .keras y los metadatos van a su lado con los nombres de
     config. Devuelve la ruta del .pkl.
@@ -503,6 +506,8 @@ def guardar(pipeline, nombre, metricas, ruta=None):
         "umbral": config.UMBRAL,
         "columnas": list(pipeline.feature_names_in_),
         "metrica_principal": config.METRICA_PRINCIPAL,
+        # Los que eligió la búsqueda, o los de la clase si no la hubo.
+        "hiperparametros": pipeline.steps[-1][1].get_params(),
         # Números nativos: el n de reservas se queda como entero y el resto, float.
         "metricas_test": {k: int(v) if isinstance(v, (int, np.integer)) else float(v)
                           for k, v in metricas.items()},

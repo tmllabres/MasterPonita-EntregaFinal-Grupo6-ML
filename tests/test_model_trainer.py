@@ -206,6 +206,9 @@ def test_mismo_protocolo_para_todos(comparacion, monkeypatch):
     X, y = d["X_train"].iloc[:1500], d["y_train"].iloc[:1500]
     monkeypatch.setattr(config, "DEMO", True)
     monkeypatch.setattr(config, "MODELOS_ACTIVOS", ["baseline", "arbol", "red_keras"])
+    # Sin búsqueda, para que los tres pasen por cross_validate; los folds del buscador
+    # los comprueba test_la_busqueda_se_activa_desde_config.
+    monkeypatch.setattr(config, "BUSQUEDA", None)
     por_fold = np.array([0.2, 0.4, 0.9])
     llamadas = {}
 
@@ -299,6 +302,7 @@ def test_guardar_deja_el_pipeline_completo_y_sus_metadatos(comparacion, tmp_path
     assert metadatos["semilla"] == config.SEMILLA
     assert metadatos["ficheros"] == [ruta.name]
     assert "scikit-learn" in metadatos["versiones"]
+    assert metadatos["hiperparametros"] == modelos["arbol"][-1].get_params()
 
     recargado = joblib.load(ruta)
     np.testing.assert_array_equal(recargado.predict_proba(d["X_test"]),
