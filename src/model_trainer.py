@@ -503,7 +503,9 @@ def guardar(pipeline, nombre, metricas, ruta=None):
         "umbral": config.UMBRAL,
         "columnas": list(pipeline.feature_names_in_),
         "metrica_principal": config.METRICA_PRINCIPAL,
-        "metricas_test": {k: float(v) for k, v in metricas.items()},
+        # Números nativos: el n de reservas se queda como entero y el resto, float.
+        "metricas_test": {k: int(v) if isinstance(v, (int, np.integer)) else float(v)
+                          for k, v in metricas.items()},
         "semilla": config.SEMILLA,
         "demo": bool(config.DEMO),
         "versiones": _versiones(),
